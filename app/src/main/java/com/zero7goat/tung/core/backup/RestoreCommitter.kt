@@ -3,6 +3,8 @@ package com.zero7goat.tung.core.backup
 import java.io.File
 import java.io.IOException
 import java.security.MessageDigest
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * Applies a staged restore so that the database and the stored files always end up matching:
@@ -65,12 +67,18 @@ class RestoreCommitter(
                 if (!live.isDirectory && !live.mkdirs()) throw IOException("Cannot prepare $relative")
                 if (!live.renameTo(previousFor(relative))) throw IOException("Cannot move $relative aside")
                 val staged = stagedDirs[index]
-                if (!staged.isDirectory && !staged.mkdirs()) throw IOException("Cannot prepare staged data")
+                // Staging must still be there: an empty stand-in would restore records without contents.
+                if (!staged.isDirectory) throw IOException("Staged data is missing")
                 if (!staged.renameTo(live)) throw IOException("Cannot move staged data into place")
             }
             replaceDatabase()
         } catch (e: Throwable) {
-            rollBack()
+            try {
+                rollBack()
+            } catch (rollbackFailure: IOException) {
+                // The journal stays, so the next start finishes the rollback.
+                e.addSuppressed(rollbackFailure)
+            }
             throw e
         }
         finish()
@@ -99,16 +107,23 @@ class RestoreCommitter(
 
     private fun previousFor(relative: String) = File(previousDir, relative.replace('/', '_'))
 
+    /**
+     * Puts every moved-aside directory back. Only when all of them are back are the journal and the
+     * work directory removed; otherwise they are kept (the previous data is never deleted) and an
+     * [IOException] is thrown, so the next [recover] tries again.
+     */
     private fun rollBack() {
+        var complete = true
         liveDirs.forEach { relative ->
             val previous = previousFor(relative)
             if (previous.exists()) {
                 val live = File(root, relative)
                 live.deleteRecursively()
                 live.parentFile?.mkdirs()
-                previous.renameTo(live)
+                if (live.exists() || !previous.renameTo(live)) complete = false
             }
         }
+        if (!complete) throw IOException("Previous data could not be put back yet")
         journal.delete()
         previousDir.deleteRecursively()
         discardStaging()
@@ -131,18 +146,42 @@ class RestoreCommitter(
         const val FILES_DIR = "vault/files"
         const val NOTE_IMAGES_DIR = "vault/note_images"
 
-        /** A hash of every record id per table: identifies which data the database holds. */
+        private val processLock = Mutex()
+
+        /**
+         * Runs [block] while no other restore or recovery runs in this process. Every caller of
+         * [commit] and [recover] goes through this, so a recovery started by a new activity can never
+         * remove the staging directory of a restore that is still running, or race its renames.
+         */
+        suspend fun <T> exclusive(block: suspend () -> T): T = processLock.withLock { block() }
+
+        /**
+         * The key a note contributes to [fingerprint]. Note bodies decide which note images are
+         * needed, so they are part of it: a backup with the same note ids but different bodies has a
+         * different fingerprint and is never mistaken for the database's current contents.
+         */
+        fun noteKey(id: String, updatedAt: Long, body: String): String = "$id\u0000$updatedAt\u0000$body"
+
+        /**
+         * A hash identifying which data the database holds: folder, login and file ids and the
+         * [noteKey] of every note. Stored files and images are named by ids that never change, so
+         * when two data sets have the same fingerprint, either set of directories matches them.
+         */
         fun fingerprint(
             folderIds: Collection<String>,
-            noteIds: Collection<String>,
+            noteKeys: Collection<String>,
             credentialIds: Collection<String>,
             fileIds: Collection<String>
         ): String {
             val digest = MessageDigest.getInstance("SHA-256")
-            listOf("folders" to folderIds, "notes" to noteIds, "credentials" to credentialIds, "files" to fileIds)
+            listOf("folders" to folderIds, "notes" to noteKeys, "credentials" to credentialIds, "files" to fileIds)
                 .forEach { (table, ids) ->
                     digest.update("$table:${ids.size}\n".toByteArray())
-                    ids.sorted().forEach { digest.update("$it\n".toByteArray()) }
+                    ids.sorted().forEach { key ->
+                        val bytes = key.toByteArray(Charsets.UTF_8)
+                        digest.update("${bytes.size}:".toByteArray())
+                        digest.update(bytes)
+                    }
                 }
             return digest.digest().joinToString("") { "%02x".format(it) }
         }

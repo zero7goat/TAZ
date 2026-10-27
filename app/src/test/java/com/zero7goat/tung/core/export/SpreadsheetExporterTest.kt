@@ -84,6 +84,12 @@ class SpreadsheetExporterTest {
     fun safeCellTextHandlesTriggersControlCharactersAndLength() {
         assertEquals("'+1", SpreadsheetExporter.safeCellText("+1"))
         assertEquals("'-2", SpreadsheetExporter.safeCellText("-2"))
+        // Hidden behind leading whitespace, line breaks or control characters, or written full-width.
+        assertEquals("'  =1+1", SpreadsheetExporter.safeCellText("  =1+1"))
+        assertEquals("'\n@cmd", SpreadsheetExporter.safeCellText("\n@cmd"))
+        assertEquals("'=x", SpreadsheetExporter.safeCellText("\u0007=x"))
+        assertEquals("'＝1+1", SpreadsheetExporter.safeCellText("＝1+1"))
+        assertEquals("plain - text", SpreadsheetExporter.safeCellText("plain - text"))
         assertEquals("a b", SpreadsheetExporter.safeCellText("a\u0000 \u0007b"))
         assertEquals("ok", SpreadsheetExporter.safeCellText("o\uD800k")) // unpaired surrogate removed
         assertEquals("😀", SpreadsheetExporter.safeCellText("😀"))

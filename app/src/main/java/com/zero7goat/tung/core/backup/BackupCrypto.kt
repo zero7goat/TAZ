@@ -62,6 +62,8 @@ enum class BackupError {
     NOT_ENOUGH_STORAGE,
     CANNOT_READ,
     CANNOT_WRITE,
+    /** Some logins cannot be decrypted and the user did not agree to leave them out. */
+    UNREADABLE_LOGINS,
     FAILED
 }
 

@@ -205,7 +205,8 @@ class SpreadsheetExporter(
         const val MAX_CELL_CHARS = 32_767
         private const val FLUSH_EVERY_ROWS = 500
         private const val TRUNCATED_SUFFIX = " [truncated]"
-        private val FORMULA_TRIGGERS = charArrayOf('=', '+', '-', '@', '\t', '\r')
+        // Includes the full-width forms, which some spreadsheet programs also accept.
+        private val FORMULA_TRIGGERS = charArrayOf('=', '+', '-', '@', '\t', '\r', '＝', '＋', '－', '＠')
 
         /**
          * Makes [value] safe for a cell: removes characters XML cannot hold, prefixes text that
@@ -230,7 +231,10 @@ class SpreadsheetExporter(
                 i++
             }
             var text = clean.toString()
-            if (text.isNotEmpty() && text[0] in FORMULA_TRIGGERS) text = "'$text"
+            // Leading spaces or line breaks are trimmed by some programs (and CSV conversions), so
+            // the first visible character decides.
+            val first = text.firstOrNull { !it.isWhitespace() || it == '\t' || it == '\r' }
+            if (first != null && first in FORMULA_TRIGGERS) text = "'$text"
             if (text.length > MAX_CELL_CHARS) {
                 var cut = MAX_CELL_CHARS - TRUNCATED_SUFFIX.length
                 if (Character.isHighSurrogate(text[cut - 1])) cut--

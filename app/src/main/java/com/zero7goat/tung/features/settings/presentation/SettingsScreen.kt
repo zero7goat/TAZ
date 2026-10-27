@@ -25,6 +25,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +48,7 @@ import com.zero7goat.tung.core.ui.ScreenHeader
 import com.zero7goat.tung.core.ui.TungIcons
 import com.zero7goat.tung.core.ui.findFragmentActivity
 import java.time.LocalDate
+import kotlinx.coroutines.launch
 
 private sealed interface SettingsDialog {
     data object Theme : SettingsDialog
@@ -58,6 +60,7 @@ private sealed interface SettingsDialog {
     data object LockOptions : SettingsDialog
     data object ChangePasscode : SettingsDialog
     data object TurnOffLock : SettingsDialog
+    data class UnreadableLogins(val count: Int) : SettingsDialog
     data object BackupPassphrase : SettingsDialog
     data object RestoreConfirm : SettingsDialog
     data object ExportInfo : SettingsDialog
@@ -106,6 +109,7 @@ fun SettingsScreen(onMessage: (String) -> Unit, modifier: Modifier = Modifier) {
     val activity = remember(context) { context.findFragmentActivity() }
     val biometric = remember(context) { BiometricAuth.availability(context) }
     var dialog by remember { mutableStateOf<SettingsDialog?>(null) }
+    val scope = rememberCoroutineScope()
     val transfer by viewModel.transfer.collectAsStateWithLifecycle()
     val busy = transfer is TransferState.Working
 
@@ -192,8 +196,10 @@ fun SettingsScreen(onMessage: (String) -> Unit, modifier: Modifier = Modifier) {
 
         SectionLabel("Backup")
         SettingRow("Back up to a file", null, enabled = !busy) {
-            viewModel.clearPassphrases()
-            dialog = SettingsDialog.BackupPassphrase
+            scope.launch {
+                val unreadable = viewModel.prepareBackup()
+                dialog = if (unreadable > 0) SettingsDialog.UnreadableLogins(unreadable) else SettingsDialog.BackupPassphrase
+            }
         }
         RowDivider()
         SettingRow("Restore from a file", null, enabled = !busy) {
@@ -285,6 +291,14 @@ fun SettingsScreen(onMessage: (String) -> Unit, modifier: Modifier = Modifier) {
                 viewModel.onLockRemoved()
                 dialog = null
                 onMessage("App lock turned off")
+            },
+            onDismiss = { dialog = null }
+        )
+        is SettingsDialog.UnreadableLogins -> UnreadableLoginsDialog(
+            count = (dialog as SettingsDialog.UnreadableLogins).count,
+            onContinue = {
+                viewModel.allowBackupWithoutUnreadableLogins()
+                dialog = SettingsDialog.BackupPassphrase
             },
             onDismiss = { dialog = null }
         )

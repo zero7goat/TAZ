@@ -88,6 +88,10 @@ class SettingsViewModel(
     val passphraseConfirm = TextFieldState()
 
     /** The backup file picked for restoring, held until the user confirms. */
+    override fun onCleared() {
+        clearPassphrases()
+    }
+
     var pendingRestore: Uri? = null
         private set
 
@@ -100,11 +104,33 @@ class SettingsViewModel(
         passphraseConfirm.clearText()
     }
 
+    // Set only after the user explicitly agreed to back up without logins that cannot be decrypted.
+    private var allowUnreadableLogins = false
+
+    /** How many logins cannot be decrypted (and so cannot be backed up). Resets the consent above. */
+    suspend fun prepareBackup(): Int {
+        allowUnreadableLogins = false
+        clearPassphrases()
+        return try {
+            backups.unreadableLoginCount()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            0 // the backup itself checks again and stops if logins cannot be read
+        }
+    }
+
+    fun allowBackupWithoutUnreadableLogins() {
+        allowUnreadableLogins = true
+    }
+
     fun startBackup(uri: Uri) {
         val secret = takePassphrase()
+        val allowUnreadable = allowUnreadableLogins
+        allowUnreadableLogins = false
         run(working = "Creating encrypted backup...") {
             try {
-                val summary = backups.createBackup(uri, secret) { phase ->
+                val summary = backups.createBackup(uri, secret, allowUnreadable) { phase ->
                     if (phase == BackupPhase.ENCRYPTING) _transfer.value = TransferState.Working("Encrypting and writing backup...")
                 }
                 TransferState.Finished("Backup created", backupMessage(summary))

@@ -69,6 +69,7 @@ internal fun failureTitle(error: BackupError): String = when (error) {
     BackupError.NOT_A_BACKUP -> "Not a TAZ backup"
     BackupError.UNSUPPORTED_VERSION -> "Unsupported backup"
     BackupError.NOT_ENOUGH_STORAGE -> "Not enough storage"
+    BackupError.UNREADABLE_LOGINS -> "Backup not created"
     else -> "Couldn't complete"
 }
 
@@ -84,8 +85,42 @@ internal fun failureMessage(error: BackupError): String {
         BackupError.NOT_ENOUGH_STORAGE -> "There isn't enough free storage. Free some space and try again. $unchanged"
         BackupError.CANNOT_READ -> "The file couldn't be read. $unchanged"
         BackupError.CANNOT_WRITE -> "The backup couldn't be written to the chosen location. Your data was not changed."
+        BackupError.UNREADABLE_LOGINS -> "Some logins can't be decrypted on this device, so no backup was created. " +
+            "Start the backup again to review them. $unchanged"
         BackupError.FAILED -> "Something went wrong. $unchanged"
     }
+}
+
+/**
+ * Shown before a backup when some logins cannot be decrypted. Continuing is an explicit choice;
+ * without it the backup is not made.
+ */
+@Composable
+fun UnreadableLoginsDialog(count: Int, onContinue: () -> Unit, onDismiss: () -> Unit) {
+    val logins = if (count == 1) "1 login" else "$count logins"
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Some logins can't be read") },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    "$logins can't be decrypted on this device, for example because its encryption key " +
+                        "was lost. They cannot be included in a backup and would not be restored from it.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Text(
+                    "Their encrypted data stays on this device unchanged. Everything else, including all " +
+                        "readable logins, can still be backed up.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+            }
+        },
+        confirmButton = { TextButton(onClick = onContinue) { Text("Back up without them") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
+    )
 }
 
 /** Asks for a new passphrase (twice) before the user picks where to save a backup. */

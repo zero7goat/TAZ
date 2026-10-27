@@ -228,6 +228,29 @@ class BackupArchiveTest {
         """[{"id":"$id","folderId":null,"originalName":"a","displayName":"a","mimeType":"x","sizeBytes":1,
             "keywords":"","description":"","isFavorite":false,"createdAt":1,"updatedAt":1}]"""
 
+    /** Encrypts [plain] in 1 KiB chunks so the archive and the last chunk are separate. */
+    private fun encryptSmallChunks(plain: ByteArray): ByteArray {
+        val header = BackupHeader(1_000, ByteArray(16) { it.toByte() }, ByteArray(8) { 7 }, chunkSize = 1024)
+        val out = ByteArrayOutputStream()
+        EncryptingOutputStream(out, BackupKeys.derive(passphrase.toCharArray(), header), header).use { it.write(plain) }
+        return out.toByteArray()
+    }
+
+    @Test
+    fun theLastChunkIsVerifiedEvenAfterTheArchiveEnds() {
+        // A complete archive followed by more data: the reader must still authenticate the end.
+        val plain = zip("manifest.json" to manifest().toByteArray(), *emptyData()) + ByteArray(3000)
+        val intact = encryptSmallChunks(plain)
+        restore(intact) // padding after the archive is accepted when authentic
+
+        val tampered = intact.copyOf().also { it[it.size - 5] = (it[it.size - 5].toInt() xor 1).toByte() }
+        assertFails(BackupError.DAMAGED) { restore(tampered) }
+
+        val remainder = plain.size % 1024
+        val lastChunkBytes = 5 + (if (remainder == 0) 1024 else remainder) + 16 // flag, length, data, tag
+        assertFails(BackupError.INCOMPLETE) { restore(intact.copyOf(intact.size - lastChunkBytes)) }
+    }
+
     @Test
     fun minimalValidArchiveIsAccepted() {
         val staged = readZip(zip("manifest.json" to manifest().toByteArray(), *emptyData()))

@@ -70,10 +70,26 @@ class BackupService(
     // ---------- backup ----------
 
     /**
+     * How many saved logins cannot be decrypted on this device (for example because the Keystore
+     * key was lost). Such logins can never be put into a backup; nothing is changed by checking.
+     */
+    suspend fun unreadableLoginCount(): Int = credentials.decryptAllForBackup().second
+
+    /**
      * Writes an encrypted backup of everything to [uri] (a new document the user just created).
      * On failure the partly written document is deleted again. Throws [BackupException].
+     *
+     * Logins that cannot be decrypted cannot be included. Unless the user explicitly agreed to
+     * leave them out ([allowUnreadableLogins]), the backup is aborted with
+     * [BackupError.UNREADABLE_LOGINS] instead of silently producing an incomplete backup. Their
+     * encrypted data on the device is never changed either way.
      */
-    suspend fun createBackup(uri: Uri, passphrase: CharArray, onPhase: (BackupPhase) -> Unit): BackupSummary =
+    suspend fun createBackup(
+        uri: Uri,
+        passphrase: CharArray,
+        allowUnreadableLogins: Boolean,
+        onPhase: (BackupPhase) -> Unit
+    ): BackupSummary =
         withContext(Dispatchers.IO) {
             onPhase(BackupPhase.PREPARING)
             val snapshot = database.withTransaction {
@@ -86,6 +102,7 @@ class BackupService(
             val scope = currentCoroutineContext()
             try {
                 val (logins, unreadable) = credentials.decryptAllForBackup()
+                if (unreadable > 0 && !allowUnreadableLogins) throw BackupException(BackupError.UNREADABLE_LOGINS)
                 val contents = toContents(snapshot, logins, currentSettings())
                 val header = BackupHeader.create(kdfIterations)
                 val key = BackupKeys.derive(passphrase, header)
@@ -189,93 +206,108 @@ class BackupService(
      */
     suspend fun restore(uri: Uri, passphrase: CharArray, onPhase: (BackupPhase) -> Unit): RestoreSummary =
         withContext(Dispatchers.IO) {
-            recoverInterruptedRestore()
-            onPhase(BackupPhase.DECRYPTING)
-            val staging = committer.newStagingDir()
-            var committed = false
-            try {
-                val scope = currentCoroutineContext()
-                val input = try {
-                    context.contentResolver.openInputStream(uri)
-                } catch (e: Exception) {
-                    null
-                } ?: throw BackupException(BackupError.CANNOT_READ)
+            // Held from staging to commit, so a recovery started meanwhile cannot touch the staging.
+            RestoreCommitter.exclusive { restoreLocked(uri, passphrase, onPhase) }
+        }
 
-                val staged = BufferedInputStream(input, 64 * 1024).use { buffered ->
-                    val header = BackupHeader.read(buffered)
-                    val key = BackupKeys.derive(passphrase, header)
-                    BackupArchiveReader(checkCancelled = { scope.ensureActive() }).read(
-                        input = DecryptingInputStream(buffered, key, header),
-                        stagingDir = staging,
-                        ensureSpace = { needed ->
-                            if (filesDir.usableSpace < needed + SPACE_RESERVE_BYTES) {
-                                throw BackupException(BackupError.NOT_ENOUGH_STORAGE)
-                            }
-                        }
-                    )
-                }
+    private suspend fun restoreLocked(uri: Uri, passphrase: CharArray, onPhase: (BackupPhase) -> Unit): RestoreSummary {
+        try {
+            recoverLocked()
+        } catch (e: Exception) {
+            // An earlier interrupted restore could not be completed or undone yet: change nothing.
+            throw BackupException(BackupError.FAILED)
+        }
+        onPhase(BackupPhase.DECRYPTING)
+        val staging = committer.newStagingDir()
+        var committed = false
+        try {
+            val scope = currentCoroutineContext()
+            val input = try {
+                context.contentResolver.openInputStream(uri)
+            } catch (e: Exception) {
+                null
+            } ?: throw BackupException(BackupError.CANNOT_READ)
 
-                onPhase(BackupPhase.APPLYING)
-                val contents = staged.contents
-                val entities = try {
-                    contents.credentials.map { credentials.encryptForRestore(it.toDetail()) }
-                } catch (e: FieldCipherException) {
-                    throw BackupException(BackupError.FAILED)
-                }
-                val fingerprint = RestoreCommitter.fingerprint(
-                    contents.folders.map { it.id }, contents.notes.map { it.id },
-                    contents.credentials.map { it.id }, contents.files.map { it.id }
-                )
-                // Past this point the restore is not cancelled half way.
-                withContext(NonCancellable) {
-                    committer.commit(listOf(staged.stagedFiles, staged.stagedImages), fingerprint) {
-                        database.withTransaction {
-                            database.noteDao().deleteAll()
-                            database.credentialDao().deleteAll()
-                            database.fileDao().deleteAll()
-                            database.folderDao().deleteAll()
-                            database.folderDao().insertAll(parentsFirst(contents.folders).map {
-                                FolderEntity(it.id, it.module, it.name, it.parentId, it.createdAt)
-                            })
-                            database.noteDao().insertAll(contents.notes.map { it.toEntity() })
-                            database.credentialDao().insertAll(entities)
-                            database.fileDao().insertAll(contents.files.map { it.toEntity(vault) })
+            val staged = BufferedInputStream(input, 64 * 1024).use { buffered ->
+                val header = BackupHeader.read(buffered)
+                val key = BackupKeys.derive(passphrase, header)
+                BackupArchiveReader(checkCancelled = { scope.ensureActive() }).read(
+                    input = DecryptingInputStream(buffered, key, header),
+                    stagingDir = staging,
+                    ensureSpace = { needed ->
+                        if (filesDir.usableSpace < needed + SPACE_RESERVE_BYTES) {
+                            throw BackupException(BackupError.NOT_ENOUGH_STORAGE)
                         }
                     }
-                    committed = true
-                    credentials.clearCache()
-                    applySettings(contents.settings)
-                    ShareStaging.clear(context)
-                }
-                RestoreSummary(
-                    notes = contents.notes.size,
-                    logins = contents.credentials.size,
-                    files = contents.files.size,
-                    folders = contents.folders.size,
-                    noteImages = staged.noteImageCount.coerceAtLeast(0),
-                    missingFiles = staged.missingFiles.size,
-                    skippedLogins = staged.skippedLogins
                 )
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: BackupException) {
-                throw e
-            } catch (e: SecurityException) {
-                throw BackupException(BackupError.CANNOT_READ)
-            } catch (e: Exception) {
-                throw BackupException(BackupError.FAILED)
-            } finally {
-                if (!committed) committer.discardStaging()
             }
+
+            onPhase(BackupPhase.APPLYING)
+            val contents = staged.contents
+            val entities = try {
+                contents.credentials.map { credentials.encryptForRestore(it.toDetail()) }
+            } catch (e: FieldCipherException) {
+                throw BackupException(BackupError.FAILED)
+            }
+            val fingerprint = RestoreCommitter.fingerprint(
+                contents.folders.map { it.id },
+                contents.notes.map { RestoreCommitter.noteKey(it.id, it.updatedAt, it.body) },
+                contents.credentials.map { it.id }, contents.files.map { it.id }
+            )
+            // Past this point the restore is not cancelled half way.
+            withContext(NonCancellable) {
+                committer.commit(listOf(staged.stagedFiles, staged.stagedImages), fingerprint) {
+                    database.withTransaction {
+                        database.noteDao().deleteAll()
+                        database.credentialDao().deleteAll()
+                        database.fileDao().deleteAll()
+                        database.folderDao().deleteAll()
+                        database.folderDao().insertAll(parentsFirst(contents.folders).map {
+                            FolderEntity(it.id, it.module, it.name, it.parentId, it.createdAt)
+                        })
+                        database.noteDao().insertAll(contents.notes.map { it.toEntity() })
+                        database.credentialDao().insertAll(entities)
+                        database.fileDao().insertAll(contents.files.map { it.toEntity(vault) })
+                    }
+                }
+                committed = true
+                credentials.clearCache()
+                applySettings(contents.settings)
+                ShareStaging.clear(context)
+            }
+            return RestoreSummary(
+                notes = contents.notes.size,
+                logins = contents.credentials.size,
+                files = contents.files.size,
+                folders = contents.folders.size,
+                noteImages = staged.noteImageCount.coerceAtLeast(0),
+                missingFiles = staged.missingFiles.size,
+                skippedLogins = staged.skippedLogins
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: BackupException) {
+            throw e
+        } catch (e: SecurityException) {
+            throw BackupException(BackupError.CANNOT_READ)
+        } catch (e: Exception) {
+            throw BackupException(BackupError.FAILED)
+        } finally {
+            if (!committed) committer.discardStaging()
         }
+    }
 
     /** Finishes or undoes a restore that was interrupted (for example by the app being killed). */
     suspend fun recoverInterruptedRestore() = withContext(Dispatchers.IO) {
+        RestoreCommitter.exclusive { recoverLocked() }
+    }
+
+    private suspend fun recoverLocked() {
         committer.recover {
             database.withTransaction {
                 RestoreCommitter.fingerprint(
                     database.folderDao().getAll().map { it.id },
-                    database.noteDao().getAll().map { it.id },
+                    database.noteDao().getAll().map { RestoreCommitter.noteKey(it.id, it.updatedAt, it.body) },
                     database.credentialDao().getAll().map { it.id },
                     database.fileDao().getAll().map { it.id }
                 )
