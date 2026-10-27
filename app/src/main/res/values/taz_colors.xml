@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Launcher icon background: sampled from the supplied launcher image (taz_app_icon.png). -->
+    <color name="taz_launcher_background">#040707</color>
+    <!-- Window background before the first Compose frame; matches the light theme background. -->
+    <color name="taz_window_background">#FFFFFFFF</color>
+</resources>

@@ -1,47 +1,80 @@
 package com.zero7goat.tung
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.tooling.preview.Preview
-import com.zero7goat.tung.ui.theme.TUNGTheme
+import androidx.fragment.app.FragmentActivity
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.lifecycleScope
+import androidx.lifecycle.repeatOnLifecycle
+import com.zero7goat.tung.core.AppContainer
+import com.zero7goat.tung.core.backup.BackupService
+import com.zero7goat.tung.core.security.AppLockManager
+import com.zero7goat.tung.core.security.SecureWindow
+import com.zero7goat.tung.core.ui.TungApp
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 
-class MainActivity : ComponentActivity() {
+/**
+ * A FragmentActivity (still a ComponentActivity) because BiometricPrompt needs one. It feeds
+ * the app lock the events it needs: touches, leaving and returning to the app, and a once-a-second
+ * check for inactivity while the app is open.
+ */
+class MainActivity : FragmentActivity() {
+
+    private lateinit var lockManager: AppLockManager
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        val settings = AppContainer.settings(applicationContext)
+        lockManager = AppContainer.lockManager(applicationContext)
+
+        // Secure until the saved "hide in recent apps" setting says otherwise.
+        SecureWindow.refresh(window)
         enableEdgeToEdge()
-        setContent {
-            TUNGTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
-                    Greeting(
-                        name = "Android",
-                        modifier = Modifier.padding(innerPadding)
-                    )
+
+        lifecycleScope.launch {
+            settings.settings
+                .map { it.hideInRecents }
+                .distinctUntilChanged()
+                .collect { SecureWindow.setSetting(window, it) }
+        }
+        lifecycleScope.launch {
+            repeatOnLifecycle(Lifecycle.State.STARTED) {
+                while (true) {
+                    delay(1_000)
+                    lockManager.checkInactivity()
                 }
             }
         }
+
+        // Finishes or undoes a backup restore that was interrupted (for example, the app was killed).
+        lifecycleScope.launch {
+            try {
+                BackupService.create(applicationContext).recoverInterruptedRestore()
+            } catch (e: Exception) {
+                // Left for the next start; the restore journal stays in place.
+            }
+        }
+
+        setContent { TungApp(settingsRepository = settings, lock = lockManager) }
     }
-}
 
-@Composable
-fun Greeting(name: String, modifier: Modifier = Modifier) {
-    Text(
-        text = "Hello $name!",
-        modifier = modifier
-    )
-}
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        lockManager.onUserInteraction()
+    }
 
-@Preview(showBackground = true)
-@Composable
-fun GreetingPreview() {
-    TUNGTheme {
-        Greeting("Android")
+    override fun onStart() {
+        super.onStart()
+        lockManager.onAppStarted()
+    }
+
+    override fun onStop() {
+        // Rotating the screen also stops the activity; that is not leaving the app.
+        if (!isChangingConfigurations) lockManager.onAppStopped()
+        super.onStop()
     }
 }

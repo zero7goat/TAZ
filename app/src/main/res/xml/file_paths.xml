@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Only the temporary share copies are exposed to other apps. The vault itself (files/vault)
+    and everything else in app storage is deliberately not listed here.
+-->
+<paths>
+    <cache-path
+        name="shared_files"
+        path="share/" />
+</paths>

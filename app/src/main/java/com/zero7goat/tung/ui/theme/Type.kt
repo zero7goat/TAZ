@@ -1,34 +1,31 @@
 package com.zero7goat.tung.ui.theme
 
 import androidx.compose.material3.Typography
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
 
-// Set of Material typography styles to start with
-val Typography = Typography(
-    bodyLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 16.sp,
-        lineHeight = 24.sp,
-        letterSpacing = 0.5.sp
+/**
+ * TUNG typography: the standard Material 3 type scale with a single, replaceable font family.
+ *
+ * The system default font is used for now. Bundled fonts will be passed in through
+ * [fontFamily] later, so no style needs to change when a font option is added.
+ */
+fun tungTypography(fontFamily: FontFamily = FontFamily.Default): Typography {
+    val base = Typography()
+    return base.copy(
+        displayLarge = base.displayLarge.copy(fontFamily = fontFamily),
+        displayMedium = base.displayMedium.copy(fontFamily = fontFamily),
+        displaySmall = base.displaySmall.copy(fontFamily = fontFamily),
+        headlineLarge = base.headlineLarge.copy(fontFamily = fontFamily),
+        headlineMedium = base.headlineMedium.copy(fontFamily = fontFamily),
+        headlineSmall = base.headlineSmall.copy(fontFamily = fontFamily),
+        titleLarge = base.titleLarge.copy(fontFamily = fontFamily),
+        titleMedium = base.titleMedium.copy(fontFamily = fontFamily),
+        titleSmall = base.titleSmall.copy(fontFamily = fontFamily),
+        bodyLarge = base.bodyLarge.copy(fontFamily = fontFamily),
+        bodyMedium = base.bodyMedium.copy(fontFamily = fontFamily),
+        bodySmall = base.bodySmall.copy(fontFamily = fontFamily),
+        labelLarge = base.labelLarge.copy(fontFamily = fontFamily),
+        labelMedium = base.labelMedium.copy(fontFamily = fontFamily),
+        labelSmall = base.labelSmall.copy(fontFamily = fontFamily)
     )
-    /* Other default text styles to override
-    titleLarge = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Normal,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
-        letterSpacing = 0.sp
-    ),
-    labelSmall = TextStyle(
-        fontFamily = FontFamily.Default,
-        fontWeight = FontWeight.Medium,
-        fontSize = 11.sp,
-        lineHeight = 16.sp,
-        letterSpacing = 0.5.sp
-    )
-    */
-)
+}
