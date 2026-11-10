@@ -13,3 +13,10 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# IDE settings and signing secrets must never be committed
+/.idea/
+keystore.properties
+*.jks
+*.keystore
+/release/

@@ -112,7 +112,8 @@ private fun EditorContent(editor: EditorUiState, viewModel: NotesViewModel, onCl
     val descriptionState = rememberTextFieldState(editor.description)
     val bodyState = rememberTextFieldState(editor.body)
     var confirmDelete by remember { mutableStateOf(false) }
-    var previewing by rememberSaveable { mutableStateOf(false) }
+    // Existing notes open for reading; new notes open ready to type.
+    var previewing by rememberSaveable { mutableStateOf(!editor.isNewNote) }
     // True once the body has been focused; the formatting bar only acts on the body.
     var bodyActive by remember { mutableStateOf(false) }
     var imageError by remember { mutableStateOf<String?>(null) }
