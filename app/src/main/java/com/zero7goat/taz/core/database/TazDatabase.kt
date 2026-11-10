@@ -17,7 +17,7 @@ import com.zero7goat.taz.features.passwords.data.CredentialEntity
  */
 @Database(
     entities = [FolderEntity::class, NoteEntity::class, CredentialEntity::class, FileEntity::class],
-    version = 5,
+    version = 6,
     exportSchema = true
 )
 abstract class TazDatabase : RoomDatabase() {
@@ -32,7 +32,7 @@ abstract class TazDatabase : RoomDatabase() {
 
     companion object {
         // DO NOT RENAME: existing user data depends on this exact value (see DataIdentityTest).
-        const val DATABASE_NAME = "tung.db"
+        const val DATABASE_NAME = "taz.db"
 
         @Volatile
         private var instance: TazDatabase? = null

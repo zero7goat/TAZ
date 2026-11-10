@@ -95,8 +95,8 @@ class BackupService(
             val snapshot = database.withTransaction {
                 Snapshot(
                     folders = database.folderDao().getAll(),
-                    notes = database.noteDao().getAll(),
-                    files = database.fileDao().getAll()
+                    notes = database.noteDao().getAllActive(),
+                    files = database.fileDao().getAllActive()
                 )
             }
             val scope = currentCoroutineContext()

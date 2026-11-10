@@ -1,5 +1,6 @@
 package com.zero7goat.taz
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -8,10 +9,12 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.zero7goat.taz.core.AppContainer
+import com.zero7goat.taz.core.AppShortcuts
 import com.zero7goat.taz.core.backup.BackupService
 import com.zero7goat.taz.core.security.AppLockManager
 import com.zero7goat.taz.core.security.SecureWindow
 import com.zero7goat.taz.core.ui.TazApp
+import com.zero7goat.taz.features.trash.data.TrashRepository
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -59,7 +62,25 @@ class MainActivity : FragmentActivity() {
             }
         }
 
+        // The home-screen "New note" shortcut. Only on a fresh start: a rotation must not repeat it.
+        if (savedInstanceState == null && AppShortcuts.isNewNote(intent)) AppShortcuts.requestNewNote()
+
+        // Removes notes, logins and files that have been in the trash for more than 30 days.
+        lifecycleScope.launch {
+            try {
+                TrashRepository.create(applicationContext).purgeExpired()
+            } catch (e: Exception) {
+                // Left for the next start; nothing is lost by waiting.
+            }
+        }
+
         setContent { TazApp(settingsRepository = settings, lock = lockManager) }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (AppShortcuts.isNewNote(intent)) AppShortcuts.requestNewNote()
     }
 
     override fun onUserInteraction() {

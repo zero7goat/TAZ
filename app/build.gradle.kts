@@ -14,11 +14,11 @@ android {
 
     defaultConfig {
         // DO NOT CHANGE: a different application id installs as a separate app and cannot update TAZ.
-        applicationId = "com.zero7goat.tung"
+        applicationId = "com.zero7goat.taz"
         minSdk = 26
         targetSdk = 37
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -54,6 +54,10 @@ android {
     buildFeatures {
         compose = true
     }
+    // Exported Room schemas, so instrumented migration tests can open an older database version.
+    sourceSets {
+        getByName("androidTest").assets.directories.add("$projectDir/schemas")
+    }
 }
 
 // Room exports its schema JSON here on every build. Commit the files in app/schemas
@@ -85,10 +89,13 @@ dependencies {
     testImplementation(libs.junit)
     // Android's org.json is only a stub in local unit tests; the backup format code uses it.
     testImplementation(libs.org.json)
+    // Runs the real v5 to v6 migration SQL against an in-memory SQLite database on the JVM.
+    testImplementation(libs.sqlite.jdbc)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.androidx.junit)
+    androidTestImplementation(libs.androidx.room.testing)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

@@ -1,5 +1,6 @@
 package com.zero7goat.taz.features.passwords.data
 
+import com.zero7goat.taz.core.database.TrashRow
 import com.zero7goat.taz.core.security.FieldCipher
 import com.zero7goat.taz.core.security.FieldCipherException
 import com.zero7goat.taz.features.passwords.domain.CredentialDetail
@@ -119,7 +120,22 @@ class CredentialRepository(
         )
     }
 
+    /** Moves the login to the trash. Its encrypted data is untouched until it is purged. */
     suspend fun delete(id: String) {
+        dao.moveToTrash(id, now())
+        synchronized(usernameCache) { usernameCache.remove(id) }
+    }
+
+    suspend fun restore(id: String) = dao.restoreFromTrash(id)
+
+    fun observeTrash(): Flow<List<TrashRow>> = dao.observeTrash()
+
+    suspend fun trashedIds(): List<String> = dao.trashedIds()
+
+    suspend fun trashedBefore(cutoff: Long): List<String> = dao.trashedBefore(cutoff)
+
+    /** Permanently deletes the login. */
+    suspend fun purge(id: String) {
         dao.deleteById(id)
         synchronized(usernameCache) { usernameCache.remove(id) }
     }
@@ -135,7 +151,7 @@ class CredentialRepository(
      */
     suspend fun decryptAllForBackup(): Pair<List<CredentialDetail>, Int> = withContext(Dispatchers.Default) {
         var unreadable = 0
-        val details = dao.getAll().mapNotNull { entity ->
+        val details = dao.getAllActive().mapNotNull { entity ->
             try {
                 CredentialDetail(
                     id = entity.id,
@@ -188,6 +204,6 @@ class CredentialRepository(
 
         /** Binds each ciphertext to its row and field. */
         // DO NOT RENAME: existing user data depends on this exact value (see DataIdentityTest).
-        fun aad(id: String, field: String) = "tung.credential.v1|$id|$field"
+        fun aad(id: String, field: String) = "taz.credential.v1|$id|$field"
     }
 }

@@ -101,7 +101,12 @@ private fun ClipboardClearTimeout.label() = when (this) {
  * DataStore settings and take effect immediately.
  */
 @Composable
-fun SettingsScreen(onMessage: (String) -> Unit, modifier: Modifier = Modifier) {
+fun SettingsScreen(
+    onMessage: (String) -> Unit,
+    onOpenTrash: () -> Unit,
+    onOpenPasswordHealth: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     val context = LocalContext.current
     val viewModel: SettingsViewModel = viewModel(factory = SettingsViewModel.factory(context.applicationContext))
     val settings by viewModel.settings.collectAsStateWithLifecycle()
@@ -193,6 +198,11 @@ fun SettingsScreen(onMessage: (String) -> Unit, modifier: Modifier = Modifier) {
         SettingRow("Clear copied passwords", settings.clipboardClearTimeout.label()) {
             dialog = SettingsDialog.Clipboard
         }
+
+        SectionLabel("Tools")
+        SettingRow("Trash", null) { onOpenTrash() }
+        RowDivider()
+        SettingRow("Password health", null) { onOpenPasswordHealth() }
 
         SectionLabel("Backup")
         SettingRow("Back up to a file", null, enabled = !busy) {

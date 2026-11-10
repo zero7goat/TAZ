@@ -34,5 +34,7 @@ data class NoteEntity(
     val updatedAt: Long,
     val isFavorite: Boolean,
     val isPinned: Boolean,
-    val colorIndex: Int
+    val colorIndex: Int,
+    /** When the note was moved to the trash (epoch ms), or null if it is not in the trash. */
+    val deletedAt: Long? = null
 )

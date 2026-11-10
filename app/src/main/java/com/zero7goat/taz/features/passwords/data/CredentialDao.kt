@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Upsert
+import com.zero7goat.taz.core.database.TrashRow
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -19,7 +20,7 @@ interface CredentialDao {
     /** List data only: no password or note ciphertext is loaded. Alphabetical by name. */
     @Query(
         "SELECT id, folderId, serviceName, websiteUrl, domain, usernameCipher, isFavorite, updatedAt " +
-            "FROM credentials ORDER BY serviceName COLLATE NOCASE ASC"
+            "FROM credentials WHERE deletedAt IS NULL ORDER BY serviceName COLLATE NOCASE ASC"
     )
     fun observeListRows(): Flow<List<CredentialListRow>>
 
@@ -33,10 +34,32 @@ interface CredentialDao {
     @Query("UPDATE credentials SET folderId = :folderId WHERE id = :id")
     suspend fun setFolder(id: String, folderId: String?)
 
-    // Used only by backup and restore.
+    // Trash. Moving to the trash only sets deletedAt; nothing is removed until the login is purged.
 
+    @Query("UPDATE credentials SET deletedAt = :deletedAt WHERE id = :id")
+    suspend fun moveToTrash(id: String, deletedAt: Long)
+
+    @Query("UPDATE credentials SET deletedAt = NULL WHERE id = :id")
+    suspend fun restoreFromTrash(id: String)
+
+    @Query("SELECT id, serviceName AS label, deletedAt FROM credentials WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC")
+    fun observeTrash(): Flow<List<TrashRow>>
+
+    @Query("SELECT id FROM credentials WHERE deletedAt IS NOT NULL AND deletedAt < :cutoff")
+    suspend fun trashedBefore(cutoff: Long): List<String>
+
+    @Query("SELECT id FROM credentials WHERE deletedAt IS NOT NULL")
+    suspend fun trashedIds(): List<String>
+
+    // Used only by backup, restore, export and the password health check.
+
+    /** Every row including the trash. Used to recognise the database state after a restore. */
     @Query("SELECT * FROM credentials")
     suspend fun getAll(): List<CredentialEntity>
+
+    /** Rows that are not in the trash. */
+    @Query("SELECT * FROM credentials WHERE deletedAt IS NULL")
+    suspend fun getAllActive(): List<CredentialEntity>
 
     @Insert
     suspend fun insertAll(entities: List<CredentialEntity>)

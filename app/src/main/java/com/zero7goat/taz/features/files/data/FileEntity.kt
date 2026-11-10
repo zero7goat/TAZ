@@ -39,7 +39,9 @@ data class FileEntity(
     val description: String,
     val isFavorite: Boolean,
     val createdAt: Long,
-    val updatedAt: Long
+    val updatedAt: Long,
+    /** When the file was moved to the trash (epoch ms), or null if it is not in the trash. */
+    val deletedAt: Long? = null
 )
 
 /** Just enough to pick a free name inside a folder. */

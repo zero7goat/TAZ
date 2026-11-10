@@ -4,6 +4,7 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
 import androidx.room.Upsert
+import com.zero7goat.taz.core.database.TrashRow
 import kotlinx.coroutines.flow.Flow
 
 @Dao
@@ -17,7 +18,7 @@ interface NoteDao {
     suspend fun getById(id: String): NoteEntity?
 
     /** Pinned notes first, then by last edit. This is only an ordering, not a section. */
-    @Query("SELECT * FROM notes ORDER BY isPinned DESC, updatedAt DESC")
+    @Query("SELECT * FROM notes WHERE deletedAt IS NULL ORDER BY isPinned DESC, updatedAt DESC")
     fun observeAll(): Flow<List<NoteEntity>>
 
     @Query("DELETE FROM notes WHERE id = :id")
@@ -37,10 +38,32 @@ interface NoteDao {
     @Query("SELECT body FROM notes")
     suspend fun getAllBodies(): List<String>
 
-    // Used only by backup and restore.
+    // Trash. Moving to the trash only sets deletedAt; nothing is removed until the item is purged.
 
+    @Query("UPDATE notes SET deletedAt = :deletedAt WHERE id = :id")
+    suspend fun moveToTrash(id: String, deletedAt: Long)
+
+    @Query("UPDATE notes SET deletedAt = NULL WHERE id = :id")
+    suspend fun restoreFromTrash(id: String)
+
+    @Query("SELECT id, title AS label, deletedAt FROM notes WHERE deletedAt IS NOT NULL ORDER BY deletedAt DESC")
+    fun observeTrash(): Flow<List<TrashRow>>
+
+    @Query("SELECT id FROM notes WHERE deletedAt IS NOT NULL AND deletedAt < :cutoff")
+    suspend fun trashedBefore(cutoff: Long): List<String>
+
+    @Query("SELECT id FROM notes WHERE deletedAt IS NOT NULL")
+    suspend fun trashedIds(): List<String>
+
+    // Used only by backup, restore and export.
+
+    /** Every row including the trash. Used to recognise the database state after a restore. */
     @Query("SELECT * FROM notes")
     suspend fun getAll(): List<NoteEntity>
+
+    /** Rows that are not in the trash: what a backup or export contains. */
+    @Query("SELECT * FROM notes WHERE deletedAt IS NULL")
+    suspend fun getAllActive(): List<NoteEntity>
 
     @Insert
     suspend fun insertAll(notes: List<NoteEntity>)

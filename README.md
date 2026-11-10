@@ -32,14 +32,16 @@ No account. No cloud. No tracking. Everything stays on your phone.
 - Rich notes with **Markdown-style formatting**, a formatting toolbar and a read-only preview mode
 - Insert **images** into notes (JPEG, PNG, WebP, GIF, up to 25 MB each)
 - **Colour-code** notes, **pin** the important ones and mark **favourites**
-- Organise with **nested folders**, then search, sort and filter
+- Organise with **nested folders**
+- **Search inside note text**: every word you type must appear somewhere in the title, description or text (any order). Results show a snippet around the match with your words in bold
 - Deleting a folder never deletes what's inside it; items move to the top level
 
 ### 🔑 Passwords
 - Store logins with service name, website, username, password and notes
 - Username, password and notes are **encrypted with AES-256-GCM**, with the key held in the **Android Keystore** and never leaving the device
 - Built-in **password generator** (8–64 characters, choose upper/lower case, digits and symbols, powered by `SecureRandom`)
-- Search by service or website, group into folders, mark favourites
+- Search by website, group into folders, mark favourites
+- **Password health check**: finds weak, reused and year-old passwords, entirely on your phone. Nothing is sent anywhere and no password is ever shown in the report
 - Copied passwords are flagged as sensitive and **cleared from the clipboard automatically** (10 s to 2 min, your choice)
 
 ### 📁 Files
@@ -57,6 +59,14 @@ No account. No cloud. No tracking. Everything stays on your phone.
 - **Screenshot blocking** and a hidden preview in the recent-apps switcher
 - **No internet permission at all**: the app physically cannot send your data anywhere
 - Forgotten your passcode? An explicit *erase everything* reset lets you start fresh (there is no backdoor)
+
+### 🗑️ Trash
+- Deleted notes, logins and files go to the **Trash** (Settings → Trash) and can be restored for **30 days**
+- Items are removed for good after 30 days, or earlier with *Delete* / *Empty trash*
+- Trashed items are not included in backups or spreadsheet exports
+
+### ⚡ Quick note
+- **Long-press the TAZ icon** on your home screen and choose **New note**. TAZ still asks for your passcode first
 
 ### 💾 Backup, restore & export
 - **Encrypted backup** to a single `.tazbackup` file, protected by a passphrase you choose

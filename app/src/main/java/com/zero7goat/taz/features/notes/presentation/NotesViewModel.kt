@@ -12,6 +12,7 @@ import com.zero7goat.taz.core.database.TazDatabase
 import com.zero7goat.taz.features.notes.data.NoteEntity
 import com.zero7goat.taz.features.notes.data.NoteImageStore
 import com.zero7goat.taz.features.notes.data.NoteRepository
+import com.zero7goat.taz.features.notes.domain.NoteSearch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -40,7 +41,9 @@ data class NotesUiState(
     val isBrowsing: Boolean = true,
     val isLoading: Boolean = true,
     val hasContent: Boolean = false,
-    val favoritesOnly: Boolean = false
+    val favoritesOnly: Boolean = false,
+    /** The search text (trimmed), used to show why a note matched. Empty when not searching. */
+    val query: String = ""
 )
 
 /** The note currently open in the editor. [noteId] is null when no editor is open. */
@@ -333,11 +336,9 @@ private fun buildUiState(
         isBrowsing = browsing,
         isLoading = false,
         hasContent = allNotes.isNotEmpty() || allFolders.isNotEmpty(),
-        favoritesOnly = onlyFavorites
+        favoritesOnly = onlyFavorites,
+        query = needle
     )
 }
 
-private fun NoteEntity.matches(needle: String): Boolean =
-    title.contains(needle, ignoreCase = true) ||
-        description.contains(needle, ignoreCase = true) ||
-        body.contains(needle, ignoreCase = true)
+private fun NoteEntity.matches(needle: String): Boolean = NoteSearch.matches(title, description, body, needle)

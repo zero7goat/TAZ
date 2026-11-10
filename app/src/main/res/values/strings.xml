@@ -1,3 +1,5 @@
 <resources>
     <string name="app_name">TAZ</string>
+    <string name="shortcut_new_note_short">New note</string>
+    <string name="shortcut_new_note_long">Write a new note</string>
 </resources>

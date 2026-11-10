@@ -22,6 +22,11 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Home-screen shortcut: long-press the icon for "New note". -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <!-- Shares copies of stored files with other apps as content:// URIs (see res/xml/file_paths.xml). -->

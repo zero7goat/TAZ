@@ -23,6 +23,8 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,7 +36,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import com.zero7goat.taz.core.AppShortcuts
 import com.zero7goat.taz.core.ui.TazIcons
+import com.zero7goat.taz.features.passwords.presentation.PasswordHealthScreen
+import com.zero7goat.taz.features.trash.presentation.TrashScreen
+import java.util.UUID
 import com.zero7goat.taz.features.files.presentation.FileDetailScreen
 import com.zero7goat.taz.features.files.presentation.FilesScreen
 import com.zero7goat.taz.features.notes.presentation.NoteEditorScreen
@@ -63,6 +69,8 @@ private sealed interface Screen {
     data class NoteEditor(val id: String) : Screen
     data class PasswordEditor(val id: String) : Screen
     data class FileViewer(val id: String) : Screen
+    data object Trash : Screen
+    data object PasswordHealth : Screen
 }
 
 private val ContentMaxWidth = 720.dp
@@ -83,7 +91,27 @@ fun AppNavigation(modifier: Modifier = Modifier) {
     var editingCredentialId by rememberSaveable { mutableStateOf<String?>(null) }
     // The stored file being viewed (only its id is saved).
     var viewingFileId by rememberSaveable { mutableStateOf<String?>(null) }
+    // Full-screen tools opened from Settings and Passwords.
+    var showTrash by rememberSaveable { mutableStateOf(false) }
+    var showPasswordHealth by rememberSaveable { mutableStateOf(false) }
     val shellStateHolder = rememberSaveableStateHolder()
+
+    // The home-screen "New note" shortcut. This composable only exists once TAZ is unlocked, so the
+    // new note opens after the passcode (or biometric) check, never before it.
+    val shortcutRequestedAt by AppShortcuts.newNoteRequestedAt.collectAsState()
+    LaunchedEffect(shortcutRequestedAt) {
+        if (shortcutRequestedAt != 0L) {
+            if (AppShortcuts.isFresh(shortcutRequestedAt, System.currentTimeMillis())) {
+                currentPath = Route.Notes.path
+                editingCredentialId = null
+                viewingFileId = null
+                showTrash = false
+                showPasswordHealth = false
+                editingNoteId = UUID.randomUUID().toString()
+            }
+            AppShortcuts.clearNewNote()
+        }
+    }
 
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
@@ -101,6 +129,8 @@ fun AppNavigation(modifier: Modifier = Modifier) {
         openNoteId != null -> Screen.NoteEditor(openNoteId)
         openCredentialId != null -> Screen.PasswordEditor(openCredentialId)
         openFileId != null -> Screen.FileViewer(openFileId)
+        showPasswordHealth -> Screen.PasswordHealth
+        showTrash -> Screen.Trash
         else -> Screen.Shell
     }
 
@@ -140,6 +170,16 @@ fun AppNavigation(modifier: Modifier = Modifier) {
                     modifier = Modifier.fillMaxSize()
                 )
             }
+            Screen.PasswordHealth -> ContentFrame {
+                PasswordHealthScreen(
+                    onClose = { showPasswordHealth = false },
+                    onOpenLogin = { editingCredentialId = it },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            Screen.Trash -> ContentFrame {
+                TrashScreen(onClose = { showTrash = false }, modifier = Modifier.fillMaxSize())
+            }
             Screen.Shell -> {
                 // Keeps list scroll position and search text while an editor is open.
                 shellStateHolder.SaveableStateProvider("shell") {
@@ -164,6 +204,7 @@ fun AppNavigation(modifier: Modifier = Modifier) {
                                         )
                                         Route.Passwords -> PasswordsScreen(
                                             onOpenCredential = { editingCredentialId = it },
+                                            onOpenHealth = { showPasswordHealth = true },
                                             modifier = screenModifier
                                         )
                                         Route.Files -> FilesScreen(
@@ -171,7 +212,12 @@ fun AppNavigation(modifier: Modifier = Modifier) {
                                             onMessage = showMessage,
                                             modifier = screenModifier
                                         )
-                                        Route.Settings -> SettingsScreen(onMessage = showMessage, modifier = screenModifier)
+                                        Route.Settings -> SettingsScreen(
+                                            onMessage = showMessage,
+                                            onOpenTrash = { showTrash = true },
+                                            onOpenPasswordHealth = { showPasswordHealth = true },
+                                            modifier = screenModifier
+                                        )
                                     }
                                 }
                             }

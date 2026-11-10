@@ -16,7 +16,7 @@ class AesGcmFieldCipherTest {
 
     private val key = newKey()
     private val cipher = AesGcmFieldCipher { key }
-    private val aad = "tung.credential.v1|id-1|password"
+    private val aad = "taz.credential.v1|id-1|password"
 
     private fun assertRejected(block: () -> Unit) {
         try {
@@ -85,13 +85,13 @@ class AesGcmFieldCipherTest {
     @Test
     fun rejectsDifferentField() {
         val blob = cipher.encrypt("secret", aad)
-        assertRejected { cipher.decrypt(blob, "tung.credential.v1|id-1|username") }
+        assertRejected { cipher.decrypt(blob, "taz.credential.v1|id-1|username") }
     }
 
     @Test
     fun rejectsDifferentRow() {
         val blob = cipher.encrypt("secret", aad)
-        assertRejected { cipher.decrypt(blob, "tung.credential.v1|id-2|password") }
+        assertRejected { cipher.decrypt(blob, "taz.credential.v1|id-2|password") }
     }
 
     @Test

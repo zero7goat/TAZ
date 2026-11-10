@@ -36,7 +36,9 @@ data class CredentialEntity(
     val noteCipher: ByteArray,
     val isFavorite: Boolean,
     val createdAt: Long,
-    val updatedAt: Long
+    val updatedAt: Long,
+    /** When the login was moved to the trash (epoch ms), or null if it is not in the trash. */
+    val deletedAt: Long? = null
 ) {
     // Ciphertext is never printed.
     override fun toString(): String = "CredentialEntity(id=$id)"

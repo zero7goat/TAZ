@@ -33,7 +33,7 @@ class SpreadsheetExportService(private val context: Context, private val databas
             val folders = database.folderDao().getAll()
             ExportData(
                 folders = folders.map { ExportFolder(it.id, it.module, it.name, it.parentId) },
-                notes = database.noteDao().getAll()
+                notes = database.noteDao().getAllActive()
                     .sortedWith(compareBy({ it.title.lowercase() }, { it.createdAt }))
                     .map {
                         ExportNote(
@@ -44,7 +44,7 @@ class SpreadsheetExportService(private val context: Context, private val databas
                             createdAt = it.createdAt, updatedAt = it.updatedAt
                         )
                     },
-                files = database.fileDao().getAll()
+                files = database.fileDao().getAllActive()
                     .sortedBy { it.displayName.lowercase() }
                     .map {
                         ExportFile(
@@ -55,7 +55,7 @@ class SpreadsheetExportService(private val context: Context, private val databas
                             createdAt = it.createdAt, updatedAt = it.updatedAt
                         )
                     },
-                logins = database.credentialDao().getAll()
+                logins = database.credentialDao().getAllActive()
                     .sortedBy { it.serviceName.lowercase() }
                     .map {
                         ExportLogin(

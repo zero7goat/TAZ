@@ -19,7 +19,7 @@ import kotlinx.coroutines.flow.map
 
 // Separate from the settings file: this one holds passcode verification data.
 // DO NOT RENAME: existing user data depends on this exact value (see DataIdentityTest).
-private val Context.securityPreferences: DataStore<Preferences> by preferencesDataStore(name = "tung_security")
+private val Context.securityPreferences: DataStore<Preferences> by preferencesDataStore(name = "taz_security")
 
 /**
  * Stores what is needed to verify the passcode, never the passcode itself:
@@ -99,7 +99,7 @@ class PasscodeStore(
 
     private companion object {
         // DO NOT RENAME: existing user data depends on this exact value (see DataIdentityTest).
-        const val AAD = "tung.passcode.v1"
+        const val AAD = "taz.passcode.v1"
         val KEY_SALT = stringPreferencesKey("passcode_salt")
         val KEY_ITERATIONS = intPreferencesKey("passcode_iterations")
         val KEY_HASH = stringPreferencesKey("passcode_hash")

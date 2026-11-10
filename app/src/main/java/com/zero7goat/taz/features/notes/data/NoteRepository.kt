@@ -1,5 +1,6 @@
 package com.zero7goat.taz.features.notes.data
 
+import com.zero7goat.taz.core.database.TrashRow
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.withContext
@@ -28,11 +29,22 @@ class NoteRepository(
         return toSave
     }
 
+    /** Moves the note to the trash. Nothing is removed, so it can be restored until it is purged. */
+    suspend fun deleteNote(id: String) = noteDao.moveToTrash(id, now())
+
+    suspend fun restoreNote(id: String) = noteDao.restoreFromTrash(id)
+
+    fun observeTrash(): Flow<List<TrashRow>> = noteDao.observeTrash()
+
+    suspend fun trashedIds(): List<String> = noteDao.trashedIds()
+
+    suspend fun trashedBefore(cutoff: Long): List<String> = noteDao.trashedBefore(cutoff)
+
     /**
-     * Deletes the note, then the images it referenced that no other note still references.
-     * An image shared with another note is kept.
+     * Permanently deletes the note, then the images it referenced that no other note (including
+     * notes in the trash) still references. An image shared with another note is kept.
      */
-    suspend fun deleteNote(id: String) {
+    suspend fun purgeNote(id: String) {
         val body = noteDao.getById(id)?.body
         noteDao.deleteById(id)
         val store = images ?: return

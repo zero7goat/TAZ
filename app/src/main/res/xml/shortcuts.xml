@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Long-press the TAZ icon on the home screen to start a new note. The app lock still applies:
+    the new note opens only after TAZ is unlocked. targetPackage must equal the application id
+    (com.zero7goat.taz), which is fixed for the life of the app.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="new_note"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_new_note"
+        android:shortcutShortLabel="@string/shortcut_new_note_short"
+        android:shortcutLongLabel="@string/shortcut_new_note_long">
+        <intent
+            android:action="com.zero7goat.taz.action.NEW_NOTE"
+            android:targetClass="com.zero7goat.taz.MainActivity"
+            android:targetPackage="com.zero7goat.taz" />
+    </shortcut>
+</shortcuts>

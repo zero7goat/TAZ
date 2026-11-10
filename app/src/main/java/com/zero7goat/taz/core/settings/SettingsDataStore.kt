@@ -14,9 +14,9 @@ import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 
-// One DataStore instance per process for the settings file (filesDir/datastore/tung_settings.preferences_pb).
+// One DataStore instance per process for the settings file (filesDir/datastore/taz_settings.preferences_pb).
 // DO NOT RENAME: existing user data depends on this exact value (see DataIdentityTest).
-private val Context.settingsPreferences: DataStore<Preferences> by preferencesDataStore(name = "tung_settings")
+private val Context.settingsPreferences: DataStore<Preferences> by preferencesDataStore(name = "taz_settings")
 
 /**
  * Raw persistence for [AppSettings] using DataStore Preferences.

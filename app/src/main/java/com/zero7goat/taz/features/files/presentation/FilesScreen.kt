@@ -302,11 +302,11 @@ fun FilesScreen(
     fileToDelete?.let { file ->
         AlertDialog(
             onDismissRequest = { fileToDelete = null },
-            title = { Text("Delete file?") },
+            title = { Text("Move file to trash?") },
             text = {
                 Text(
-                    "\"${file.displayName}\" will be removed from TAZ, including its stored copy. " +
-                        "The original file you imported is not affected. This can't be undone."
+                    "\"${file.displayName}\" will be moved to the trash. You can restore it for 30 days. " +
+                        "The original file you imported is not affected."
                 )
             },
             confirmButton = {

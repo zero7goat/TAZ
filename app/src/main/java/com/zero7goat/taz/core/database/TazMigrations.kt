@@ -101,5 +101,25 @@ object TazMigrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+    /**
+     * Version 6: the trash. Adds a nullable `deletedAt` column to notes, credentials and files.
+     * Every existing row gets NULL, meaning "not in the trash", so nothing about existing data
+     * changes. The statements are plain ALTER TABLEs (no table is dropped or rebuilt), so an
+     * interrupted migration is rolled back by SQLite's transaction and the old data stays intact.
+     */
+    val MIGRATION_5_6_SQL: List<String> = listOf(
+        "ALTER TABLE `notes` ADD COLUMN `deletedAt` INTEGER",
+        "ALTER TABLE `credentials` ADD COLUMN `deletedAt` INTEGER",
+        "ALTER TABLE `files` ADD COLUMN `deletedAt` INTEGER"
+    )
+
+    val MIGRATION_5_6: Migration = object : Migration(5, 6) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            MIGRATION_5_6_SQL.forEach { db.execSQL(it) }
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(
+        MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6
+    )
 }

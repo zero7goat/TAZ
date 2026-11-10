@@ -5,15 +5,15 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * The app was renamed to TAZ, but its stored data must stay reachable. The database file keeps its
- * original name (the application id, Keystore key alias and encryption context strings are
- * unchanged too, and are covered by the cipher tests). If this test ever fails, existing users'
- * notes, logins and files would look empty after an update.
+ * Names that identify stored data on a device: the database file, the Keystore key alias, the
+ * DataStore files and the encryption context strings. Once TAZ is released they must never change,
+ * or existing users' notes, logins and files would look empty after an update. If this test fails,
+ * someone changed one of them.
  */
 class DataIdentityTest {
 
     @Test
-    fun databaseKeepsItsOriginalFileName() {
-        assertEquals("tung.db", TazDatabase.DATABASE_NAME)
+    fun databaseKeepsItsFileName() {
+        assertEquals("taz.db", TazDatabase.DATABASE_NAME)
     }
 }

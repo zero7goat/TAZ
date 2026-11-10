@@ -295,8 +295,8 @@ private fun EditorContent(
 private fun DeleteDialog(onConfirm: () -> Unit, onDismiss: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Delete login?") },
-        text = { Text("This login will be permanently deleted. This can't be undone.") },
+        title = { Text("Move login to trash?") },
+        text = { Text("It will be moved to the trash. You can restore it for 30 days.") },
         confirmButton = { TextButton(onClick = onConfirm) { Text("Delete") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )

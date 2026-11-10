@@ -60,6 +60,10 @@ import com.zero7goat.taz.core.ui.TazFab
 import com.zero7goat.taz.core.ui.TazIcons
 import com.zero7goat.taz.core.ui.replaceAllText
 import com.zero7goat.taz.features.notes.data.NoteEntity
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import com.zero7goat.taz.features.notes.domain.NoteSearch
 import java.util.UUID
 
 /**
@@ -157,6 +161,7 @@ fun NotesScreen(onOpenNote: (String) -> Unit, modifier: Modifier = Modifier) {
                 else -> NotesList(
                     folders = state.folders,
                     notes = state.notes,
+                    query = state.query,
                     actions = actions,
                     modifier = Modifier.weight(1f)
                 )
@@ -234,8 +239,8 @@ fun NotesScreen(onOpenNote: (String) -> Unit, modifier: Modifier = Modifier) {
     noteToDelete?.let { note ->
         AlertDialog(
             onDismissRequest = { noteToDelete = null },
-            title = { Text("Delete note?") },
-            text = { Text("This can't be undone.") },
+            title = { Text("Move note to trash?") },
+            text = { Text("It will be moved to the trash. You can restore it for 30 days.") },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.deleteNote(note)
@@ -341,6 +346,7 @@ private fun PathSegment(text: String, isCurrent: Boolean, onClick: () -> Unit) {
 private fun NotesList(
     folders: List<FolderEntity>,
     notes: List<NoteEntity>,
+    query: String,
     actions: ListActions,
     modifier: Modifier = Modifier
 ) {
@@ -359,13 +365,13 @@ private fun NotesList(
         }
         if (pinned.isNotEmpty()) {
             item(key = "label-pinned") { ListLabel("Pinned") }
-            items(pinned, key = { it.id }) { note -> NoteRow(note, actions, Modifier.animateItem()) }
+            items(pinned, key = { it.id }) { note -> NoteRow(note, query, actions, Modifier.animateItem()) }
         }
         if (others.isNotEmpty()) {
             if (pinned.isNotEmpty() || folders.isNotEmpty()) {
                 item(key = "label-others") { ListLabel("Notes") }
             }
-            items(others, key = { it.id }) { note -> NoteRow(note, actions, Modifier.animateItem()) }
+            items(others, key = { it.id }) { note -> NoteRow(note, query, actions, Modifier.animateItem()) }
         }
     }
 }
@@ -446,7 +452,7 @@ private fun FolderRow(folder: FolderEntity, actions: ListActions, modifier: Modi
 }
 
 @Composable
-private fun NoteRow(note: NoteEntity, actions: ListActions, modifier: Modifier = Modifier) {
+private fun NoteRow(note: NoteEntity, query: String, actions: ListActions, modifier: Modifier = Modifier) {
     var menuOpen by remember { mutableStateOf(false) }
     val color = noteColor(note.colorIndex)
 
@@ -470,15 +476,29 @@ private fun NoteRow(note: NoteEntity, actions: ListActions, modifier: Modifier =
                             .background(color, CircleShape)
                     )
                 }
-                // The list shows titles only; description and body are visible in the editor.
-                Text(
-                    text = note.title.ifBlank { "Untitled" },
-                    modifier = Modifier.weight(1f),
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    style = MaterialTheme.typography.titleMedium
-                )
+                // The list shows the title; while searching it also shows where the text matched.
+                val snippet = remember(note.description, note.body, query) {
+                    NoteSearch.snippet(note.description, note.body, query)
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = note.title.ifBlank { "Untitled" },
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                    if (snippet != null) {
+                        Text(
+                            text = highlighted(snippet, query),
+                            modifier = Modifier.padding(top = 4.dp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
                 if (note.isPinned) {
                     Icon(
                         imageVector = TazIcons.PinFilled,
@@ -537,3 +557,12 @@ private fun NoteRow(note: NoteEntity, actions: ListActions, modifier: Modifier =
         }
     }
 }
+
+/** [text] with the words of [query] in bold. */
+private fun highlighted(text: String, query: String): AnnotatedString =
+    buildAnnotatedString {
+        append(text)
+        NoteSearch.highlightRanges(text, query).forEach { range ->
+            addStyle(SpanStyle(fontWeight = FontWeight.Bold), range.first, range.last + 1)
+        }
+    }

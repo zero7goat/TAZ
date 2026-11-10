@@ -246,8 +246,8 @@ private fun EditorContent(editor: EditorUiState, viewModel: NotesViewModel, onCl
     if (confirmDelete) {
         AlertDialog(
             onDismissRequest = { confirmDelete = false },
-            title = { Text("Delete note?") },
-            text = { Text("This can't be undone.") },
+            title = { Text("Move note to trash?") },
+            text = { Text("It will be moved to the trash. You can restore it for 30 days.") },
             confirmButton = {
                 TextButton(onClick = {
                     confirmDelete = false

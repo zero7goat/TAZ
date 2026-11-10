@@ -69,7 +69,11 @@ import java.util.UUID
  * stored when it is saved.
  */
 @Composable
-fun PasswordsScreen(onOpenCredential: (String) -> Unit, modifier: Modifier = Modifier) {
+fun PasswordsScreen(
+    onOpenCredential: (String) -> Unit,
+    onOpenHealth: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     val appContext = LocalContext.current.applicationContext
     val viewModel: PasswordsViewModel = viewModel(factory = PasswordsViewModel.factory(appContext))
     val state by viewModel.uiState.collectAsStateWithLifecycle()
@@ -109,7 +113,8 @@ fun PasswordsScreen(onOpenCredential: (String) -> Unit, modifier: Modifier = Mod
                 canCreateFolder = state.isBrowsing,
                 onFavoritesOnlyChange = viewModel::setFavoritesOnly,
                 onNewFolder = { creatingFolder = true },
-                onGenerator = { showGenerator = true }
+                onGenerator = { showGenerator = true },
+                onHealth = onOpenHealth
             )
             if (state.isBrowsing && state.currentFolder != null) {
                 PathRow(path = state.path, onNavigate = openFolder)
@@ -235,8 +240,8 @@ fun PasswordsScreen(onOpenCredential: (String) -> Unit, modifier: Modifier = Mod
     itemToDelete?.let { item ->
         AlertDialog(
             onDismissRequest = { itemToDelete = null },
-            title = { Text("Delete login?") },
-            text = { Text("\"${item.serviceName}\" will be permanently deleted. This can't be undone.") },
+            title = { Text("Move login to trash?") },
+            text = { Text("\"${item.serviceName}\" will be moved to the trash. You can restore it for 30 days.") },
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.deleteCredential(item.id)
@@ -256,7 +261,8 @@ private fun ChipRow(
     canCreateFolder: Boolean,
     onFavoritesOnlyChange: (Boolean) -> Unit,
     onNewFolder: () -> Unit,
-    onGenerator: () -> Unit
+    onGenerator: () -> Unit,
+    onHealth: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -280,6 +286,7 @@ private fun ChipRow(
             AssistChip(onClick = onNewFolder, label = { Text("New folder") })
         }
         AssistChip(onClick = onGenerator, label = { Text("Generator") })
+        AssistChip(onClick = onHealth, label = { Text("Health") })
     }
 }
 

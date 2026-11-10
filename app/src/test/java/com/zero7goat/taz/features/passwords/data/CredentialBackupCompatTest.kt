@@ -1,5 +1,6 @@
 package com.zero7goat.taz.features.passwords.data
 
+import com.zero7goat.taz.core.database.TrashRow
 import com.zero7goat.taz.core.security.AesGcmFieldCipher
 import com.zero7goat.taz.features.passwords.domain.CredentialDetail
 import com.zero7goat.taz.features.passwords.domain.CredentialInput
@@ -27,6 +28,18 @@ class CredentialBackupCompatTest {
         override suspend fun setFavorite(id: String, isFavorite: Boolean) = Unit
         override suspend fun setFolder(id: String, folderId: String?) = Unit
         override suspend fun getAll() = rows.values.toList()
+        override suspend fun getAllActive() = rows.values.filter { it.deletedAt == null }
+        override suspend fun moveToTrash(id: String, deletedAt: Long) {
+            rows[id]?.let { rows[id] = it.copy(deletedAt = deletedAt) }
+        }
+        override suspend fun restoreFromTrash(id: String) {
+            rows[id]?.let { rows[id] = it.copy(deletedAt = null) }
+        }
+        override fun observeTrash(): Flow<List<TrashRow>> =
+            flowOf(rows.values.filter { it.deletedAt != null }.map { TrashRow(it.id, it.serviceName, it.deletedAt!!) })
+        override suspend fun trashedBefore(cutoff: Long) =
+            rows.values.filter { (it.deletedAt ?: Long.MAX_VALUE) < cutoff }.map { it.id }
+        override suspend fun trashedIds() = rows.values.filter { it.deletedAt != null }.map { it.id }
         override suspend fun insertAll(entities: List<CredentialEntity>) = entities.forEach { rows[it.id] = it }
         override suspend fun deleteAll() = rows.clear()
     }
@@ -74,9 +87,9 @@ class CredentialBackupCompatTest {
         val restored = repository.encryptForRestore(detail)
         // Both decrypt with the existing associated data scheme; the format version byte is the same.
         assertEquals(saved.passwordCipher[0], restored.passwordCipher[0])
-        assertEquals(detail.password, cipher.decrypt(restored.passwordCipher, "tung.credential.v1|id-1|password"))
-        assertEquals(detail.username, cipher.decrypt(restored.usernameCipher, "tung.credential.v1|id-1|username"))
-        assertEquals(detail.notes, cipher.decrypt(restored.noteCipher, "tung.credential.v1|id-1|notes"))
+        assertEquals(detail.password, cipher.decrypt(restored.passwordCipher, "taz.credential.v1|id-1|password"))
+        assertEquals(detail.username, cipher.decrypt(restored.usernameCipher, "taz.credential.v1|id-1|username"))
+        assertEquals(detail.notes, cipher.decrypt(restored.noteCipher, "taz.credential.v1|id-1|notes"))
     }
 
     @Test
@@ -96,5 +109,49 @@ class CredentialBackupCompatTest {
         assertEquals(1, unreadable)
         assertArrayEquals(before, dao.rows.getValue("id-2").passwordCipher)
         assertTrue(details.single().toString().contains("hidden"))
+    }
+
+    @Test
+    fun deletingALoginMovesItToTheTrashWithoutTouchingItsEncryptedData() = runBlocking {
+        val key = newKey()
+        val dao = FakeDao()
+        val repository = CredentialRepository(dao, AesGcmFieldCipher { key }, now = { 9_000L })
+        dao.insertAll(listOf(repository.encryptForRestore(detail)))
+        val before = dao.rows.getValue("id-1").passwordCipher.copyOf()
+
+        repository.delete("id-1")
+
+        assertEquals(9_000L, dao.rows.getValue("id-1").deletedAt)
+        assertArrayEquals(before, dao.rows.getValue("id-1").passwordCipher)
+        // A trashed login is not part of a backup...
+        assertTrue(repository.decryptAllForBackup().first.isEmpty())
+        // ...and comes back, still readable, when restored.
+        repository.restore("id-1")
+        assertEquals(null, dao.rows.getValue("id-1").deletedAt)
+        assertEquals(listOf("id-1"), repository.decryptAllForBackup().first.map { it.id })
+        assertEquals(detail.password, (repository.getDetail("id-1") as DetailResult.Found).detail.password)
+    }
+
+    @Test
+    fun purgingALoginRemovesItForGood() = runBlocking {
+        val key = newKey()
+        val dao = FakeDao()
+        val repository = CredentialRepository(dao, AesGcmFieldCipher { key })
+        dao.insertAll(listOf(repository.encryptForRestore(detail)))
+        repository.delete("id-1")
+        repository.purge("id-1")
+        assertTrue(dao.rows.isEmpty())
+    }
+
+    @Test
+    fun trashedIdsAndExpiryLookupWorkOnTheRepository() = runBlocking {
+        val key = newKey()
+        val dao = FakeDao()
+        val repository = CredentialRepository(dao, AesGcmFieldCipher { key }, now = { 1_000L })
+        dao.insertAll(listOf(repository.encryptForRestore(detail), repository.encryptForRestore(detail.copy(id = "id-2"))))
+        repository.delete("id-1")
+        assertEquals(listOf("id-1"), repository.trashedIds())
+        assertEquals(listOf("id-1"), repository.trashedBefore(2_000L))
+        assertTrue(repository.trashedBefore(500L).isEmpty())
     }
 }

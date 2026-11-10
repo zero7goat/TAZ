@@ -29,7 +29,7 @@ fun deleteMasterKey() = MasterKey.delete()
 private object MasterKey {
     private const val PROVIDER = "AndroidKeyStore"
     // DO NOT RENAME: existing user data depends on this exact value (see DataIdentityTest).
-    private const val ALIAS = "tung_master_v1"
+    private const val ALIAS = "taz_master_v1"
 
     @Volatile
     private var cached: SecretKey? = null

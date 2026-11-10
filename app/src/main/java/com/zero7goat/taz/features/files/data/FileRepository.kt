@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.webkit.MimeTypeMap
+import com.zero7goat.taz.core.database.TrashRow
 import com.zero7goat.taz.core.storage.ShareStaging
 import com.zero7goat.taz.core.storage.VaultFileStore
 import com.zero7goat.taz.core.storage.extensionOf
@@ -135,10 +136,30 @@ class FileRepository(
         }
     }
 
-    /** Deletes the record and the stored copy. The user's original file is not involved. */
-    suspend fun delete(file: FileEntity) {
+    /** Moves the file to the trash. Its stored copy is kept until the file is purged. */
+    suspend fun delete(file: FileEntity) = dao.moveToTrash(file.id, now())
+
+    /**
+     * Takes a file out of the trash. If another file in the same folder now has its name, it gets
+     * a " (2)" style suffix, so a restore never overwrites or duplicates a name.
+     */
+    suspend fun restore(id: String) {
+        val file = dao.getById(id) ?: return
+        val taken = dao.namesInFolder(file.folderId).filter { it.id != id }.map { it.displayName }
+        dao.restoreFromTrash(id, uniqueName(file.displayName, taken))
+    }
+
+    fun observeTrash(): Flow<List<TrashRow>> = dao.observeTrash()
+
+    suspend fun trashedIds(): List<String> = dao.trashedIds()
+
+    suspend fun trashedBefore(cutoff: Long): List<String> = dao.trashedBefore(cutoff)
+
+    /** Permanently deletes the record and the stored copy. The user's original file is not involved. */
+    suspend fun purge(id: String) {
         withContext(Dispatchers.IO) {
             storageLock.withLock {
+                val file = dao.getById(id) ?: return@withContext
                 dao.deleteById(file.id)
                 store.delete(file.storedPath) // an undeletable leftover is cleaned up later
             }
