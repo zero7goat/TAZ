@@ -142,6 +142,37 @@ class NotesViewModel(
         viewModelScope.launch { repository.deleteNote(note.id) }
     }
 
+    // ---------- several notes at once ----------
+
+    /** Moves the notes to the trash (restorable for 30 days), never erases them. */
+    fun deleteNotes(ids: Collection<String>) {
+        val targets = ids.toList()
+        viewModelScope.launch { targets.forEach { repository.deleteNote(it) } }
+    }
+
+    /** Moves the notes into [folderId], or to the top level when null. */
+    fun moveNotes(ids: Collection<String>, folderId: String?) {
+        val targets = ids.toList()
+        viewModelScope.launch { targets.forEach { repository.setFolder(it, folderId) } }
+    }
+
+    fun setFavorite(ids: Collection<String>, isFavorite: Boolean) {
+        val targets = ids.toList()
+        viewModelScope.launch { targets.forEach { repository.setFavorite(it, isFavorite) } }
+    }
+
+    fun setPinned(ids: Collection<String>, isPinned: Boolean) {
+        val targets = ids.toList()
+        viewModelScope.launch { targets.forEach { repository.setPinned(it, isPinned) } }
+    }
+
+    /** Creates a folder inside [parentId] right away and returns its id (used by the folder picker). */
+    suspend fun createFolderNow(name: String, parentId: String?): String? {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return null
+        return folderRepository.createFolder(FolderModule.NOTES, trimmed, parentId).id
+    }
+
     /** Copies a picked image into private storage. The editor then inserts a reference to it. */
     suspend fun importImage(uri: Uri): NoteImageImport = importNoteImage(appContext, imageStore, uri)
 

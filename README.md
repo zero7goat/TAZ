@@ -31,7 +31,8 @@ No account. No cloud. No tracking. Everything stays on your phone.
 ### 📝 Notes
 - Rich notes with **Markdown-style formatting**, a formatting toolbar and a read-only preview mode
 - Insert **images** into notes (JPEG, PNG, WebP, GIF, up to 25 MB each)
-- **Colour-code** notes, **pin** the important ones and mark **favourites**
+- **Colour-code** notes with 12 soft colours that stay readable in light, dark and AMOLED themes; the colour tints the note in the list and in the editor
+- **Pin** the important ones and mark **favourites**
 - Organise with **nested folders**
 - **Search inside note text**: every word you type must appear somewhere in the title, description or text (any order). Results show a snippet around the match with your words in bold
 - Deleting a folder never deletes what's inside it; items move to the top level
@@ -39,6 +40,8 @@ No account. No cloud. No tracking. Everything stays on your phone.
 ### 🔑 Passwords
 - Store logins with service name, website, username, password and notes
 - Username, password and notes are **encrypted with AES-256-GCM**, with the key held in the **Android Keystore** and never leaving the device
+- Show or hide a password with the **eye icon** inside the field
+- Unsaved login forms survive switching apps and auto-lock (kept encrypted, never as plain text)
 - Built-in **password generator** (8–64 characters, choose upper/lower case, digits and symbols, powered by `SecureRandom`)
 - Search by website, group into folders, mark favourites
 - **Password health check**: finds weak, reused and year-old passwords, entirely on your phone. Nothing is sent anywhere and no password is ever shown in the report
@@ -59,6 +62,11 @@ No account. No cloud. No tracking. Everything stays on your phone.
 - **Screenshot blocking** and a hidden preview in the recent-apps switcher
 - **No internet permission at all**: the app physically cannot send your data anywhere
 - Forgotten your passcode? An explicit *erase everything* reset lets you start fresh (there is no backdoor)
+
+### 🗂️ Folders & selection
+- Create folders in one tap, including **nested folders**
+- **Long-press to select** several notes, logins or files, then **move** them with a folder picker that always shows the destination, or send them to the Trash
+- Deleting a folder never deletes what is inside: its contents move up one level
 
 ### 🗑️ Trash
 - Deleted notes, logins and files go to the **Trash** (Settings → Trash) and can be restored for **30 days**

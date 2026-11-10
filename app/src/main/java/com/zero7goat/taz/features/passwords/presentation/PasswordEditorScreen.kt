@@ -56,6 +56,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -368,7 +369,7 @@ private fun ViewBody(
         value = if (reveal) detail.password else HIDDEN_PASSWORD,
         monospace = true
     ) {
-        TextButton(onClick = onToggleReveal) { Text(if (reveal) "Hide" else "Show") }
+        RevealButton(reveal = reveal, onToggle = onToggleReveal)
         TextButton(onClick = onCopyPassword) { Text("Copy") }
     }
     if (detail.websiteUrl.isNotBlank()) {
@@ -445,20 +446,29 @@ private fun EditBody(
     Row(verticalAlignment = Alignment.CenterVertically) {
         FieldLabel("Password *")
         Spacer(Modifier.weight(1f))
-        TextButton(onClick = onGenerate) { Text("Generate") }
-        TextButton(onClick = onToggleReveal) { Text(if (reveal) "Hide" else "Show") }
+        // The generator sits right next to the field it fills.
+        TextButton(onClick = onGenerate) {
+            Icon(TazIcons.Key, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.size(6.dp))
+            Text("Generate")
+        }
     }
-    FieldContainer {
-        BasicSecureTextField(
-            state = draft.password,
-            modifier = Modifier.fillMaxWidth(),
-            textStyle = MaterialTheme.typography.bodyLarge.copy(
-                color = MaterialTheme.colorScheme.onSurface,
-                fontFamily = FontFamily.Monospace
-            ),
-            cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
-            textObfuscationMode = if (reveal) TextObfuscationMode.Visible else TextObfuscationMode.Hidden
-        )
+    FieldContainer(innerEndPadding = 2.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // Toggling only changes how the text is drawn: the same TextFieldState keeps the
+            // password, the cursor position and any selection exactly as they were.
+            BasicSecureTextField(
+                state = draft.password,
+                modifier = Modifier.weight(1f),
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onSurface,
+                    fontFamily = FontFamily.Monospace
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
+                textObfuscationMode = if (reveal) TextObfuscationMode.Visible else TextObfuscationMode.Hidden
+            )
+            RevealButton(reveal = reveal, onToggle = onToggleReveal)
+        }
     }
 
     FieldLabel("Website address")
@@ -503,13 +513,31 @@ private fun FieldLabel(text: String) {
 }
 
 @Composable
-private fun FieldContainer(content: @Composable () -> Unit) {
+private fun FieldContainer(innerEndPadding: Dp = 14.dp, content: @Composable () -> Unit) {
     Surface(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        contentColor = MaterialTheme.colorScheme.onSurface
     ) {
-        Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) { content() }
+        Box(
+            modifier = Modifier
+                .heightIn(min = 48.dp)
+                .padding(start = 14.dp, end = innerEndPadding, top = 10.dp, bottom = 10.dp),
+            contentAlignment = Alignment.CenterStart
+        ) { content() }
+    }
+}
+
+/** Eye icon that shows or hides a password. 48dp touch target, announced as an action. */
+@Composable
+internal fun RevealButton(reveal: Boolean, onToggle: () -> Unit) {
+    IconButton(onClick = onToggle) {
+        Icon(
+            imageVector = if (reveal) TazIcons.EyeOff else TazIcons.Eye,
+            contentDescription = if (reveal) "Hide password" else "Show password",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

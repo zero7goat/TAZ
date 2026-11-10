@@ -31,7 +31,11 @@ class FolderRepository(private val folderDao: FolderDao) {
         folderDao.update(folder)
     }
 
+    /**
+     * Deletes the folder. Nothing inside is lost: subfolders and items move up to the folder's
+     * parent (or to the top level).
+     */
     suspend fun deleteFolder(folder: FolderEntity) {
-        folderDao.delete(folder)
+        folderDao.deleteKeepingContents(folder)
     }
 }

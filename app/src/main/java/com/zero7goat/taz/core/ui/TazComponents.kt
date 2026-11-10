@@ -4,10 +4,13 @@ package com.zero7goat.taz.core.ui
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -30,6 +33,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -41,20 +45,30 @@ import androidx.compose.ui.unit.sp
 
 /** The app logo above a large screen title. The title is exposed to screen readers as a heading. */
 @Composable
-fun ScreenHeader(title: String, modifier: Modifier = Modifier) {
+fun ScreenHeader(
+    title: String,
+    modifier: Modifier = Modifier,
+    actions: @Composable RowScope.() -> Unit = {}
+) {
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 20.dp, end = 20.dp, top = 16.dp)
+            .padding(start = 20.dp, end = 8.dp, top = 16.dp)
     ) {
         TazLogo(height = 28.dp, contentDescription = null)
         Spacer(Modifier.height(14.dp))
-        Text(
-            text = title,
-            modifier = Modifier.semantics { heading() },
-            color = MaterialTheme.colorScheme.onSurface,
-            style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.SemiBold)
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = title,
+                modifier = Modifier.weight(1f).semantics { heading() },
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.headlineLarge.copy(fontWeight = FontWeight.SemiBold)
+            )
+            actions()
+        }
     }
 }
 
@@ -241,6 +255,17 @@ fun SearchField(state: TextFieldState, hint: String, modifier: Modifier = Modifi
                     ),
                     cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
                     lineLimits = TextFieldLineLimits.SingleLine
+                )
+            }
+            if (state.text.isNotEmpty()) {
+                Icon(
+                    imageVector = TazIcons.Close,
+                    contentDescription = "Clear search",
+                    modifier = Modifier
+                        .size(20.dp)
+                        .clip(CircleShape)
+                        .clickable { state.replaceAllText("") },
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }

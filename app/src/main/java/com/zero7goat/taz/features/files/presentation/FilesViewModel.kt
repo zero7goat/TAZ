@@ -217,6 +217,32 @@ class FilesViewModel(
         viewModelScope.launch { repository.delete(file) }
     }
 
+    // ---------- several files at once ----------
+
+    /** Moves the files to the trash (restorable for 30 days). Stored copies stay until purged. */
+    fun deleteFiles(files: List<FileEntity>) {
+        viewModelScope.launch { files.forEach { repository.delete(it) } }
+    }
+
+    /**
+     * Moves the files one after another, so each gets a unique name in the destination
+     * (" (2)" style) even when two selected files share a name.
+     */
+    fun moveFiles(files: List<FileEntity>, folderId: String?) {
+        viewModelScope.launch { files.forEach { repository.moveFile(it, folderId) } }
+    }
+
+    fun setFavorite(files: List<FileEntity>, isFavorite: Boolean) {
+        viewModelScope.launch { files.forEach { repository.setFavorite(it.id, isFavorite) } }
+    }
+
+    /** Creates a folder inside [parentId] right away and returns its id (used by the folder picker). */
+    suspend fun createFolderNow(name: String, parentId: String?): String? {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return null
+        return folderRepository.createFolder(FolderModule.FILES, trimmed, parentId).id
+    }
+
     companion object {
         fun factory(context: Context): ViewModelProvider.Factory {
             val appContext = context.applicationContext

@@ -2,6 +2,10 @@
 
 package com.zero7goat.taz.features.notes.presentation
 
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.animateColorAsState
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -87,9 +91,16 @@ fun NoteEditorScreen(noteId: String, onClose: () -> Unit, modifier: Modifier = M
 
     LaunchedEffect(noteId) { viewModel.openEditor(noteId) }
 
+    // The note colour tints the whole editor and preview, matching its row in the list.
+    val background by animateColorAsState(
+        targetValue = (if (editor.noteId == noteId) noteTint(editor.colorIndex) else null)
+            ?: MaterialTheme.colorScheme.background,
+        animationSpec = tween(180),
+        label = "note-background"
+    )
     Surface(
         modifier = modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.background,
+        color = background,
         contentColor = MaterialTheme.colorScheme.onBackground
     ) {
         if (editor.noteId == noteId && editor.isLoaded) {
@@ -380,40 +391,78 @@ private fun FormatIconButton(
     }
 }
 
+/**
+ * Colour picker: one scrollable row of swatches. The chosen one has a ring and a check mark, so
+ * the selection is obvious without relying on colour alone. "None" is drawn as an empty circle
+ * with a slash.
+ */
 @Composable
 private fun ColorRow(selected: Int, onSelect: (Int) -> Unit) {
-    Row(
-        modifier = Modifier.padding(vertical = 14.dp),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically
+    Column(modifier = Modifier.padding(top = 12.dp, bottom = 10.dp)) {
+        Text(
+            text = "Colour · ${NoteColorNames.getOrElse(selected) { "None" }}",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelMedium
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(top = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            NoteColors.forEachIndexed { index, color ->
+                ColorSwatch(
+                    color = color,
+                    name = NoteColorNames.getOrElse(index) { "Colour ${index + 1}" },
+                    isSelected = index == selected,
+                    onClick = { onSelect(index) }
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ColorSwatch(color: Color?, name: String, isSelected: Boolean, onClick: () -> Unit) {
+    val ring by animateColorAsState(
+        targetValue = if (isSelected) MaterialTheme.colorScheme.onSurface else Color.Transparent,
+        animationSpec = tween(120),
+        label = "swatch-ring"
+    )
+    val outline = MaterialTheme.colorScheme.outline
+    Box(
+        modifier = Modifier
+            .size(44.dp) // a full touch target around a 32dp swatch
+            // One radio option per swatch for screen readers ("Note colour: Green, selected").
+            .selectable(selected = isSelected, role = Role.RadioButton, onClick = onClick)
+            .semantics { contentDescription = "Note colour: $name" },
+        contentAlignment = Alignment.Center
     ) {
-        NoteColors.forEachIndexed { index, color ->
-            val isSelected = index == selected
-            val name = NoteColorNames.getOrElse(index) { "Color ${index + 1}" }
-            Box(
-                modifier = Modifier
-                    // One radio option per swatch for screen readers ("Green, selected").
-                    .selectable(selected = isSelected, role = Role.RadioButton, onClick = { onSelect(index) })
-                    .semantics { contentDescription = "Note color: $name" }
-                    .size(32.dp)
-                    .then(
-                        if (isSelected) {
-                            Modifier.border(2.dp, MaterialTheme.colorScheme.onSurface, CircleShape)
-                        } else {
-                            Modifier
-                        }
-                    )
-                    .padding(4.dp)
-                    .clip(CircleShape)
-                    .background(color ?: Color.Transparent)
-                    .then(
-                        if (color == null) {
-                            Modifier.border(1.dp, MaterialTheme.colorScheme.outline, CircleShape)
-                        } else {
-                            Modifier
-                        }
-                    )
-            )
+        Box(
+            modifier = Modifier
+                .size(38.dp)
+                .border(2.dp, ring, CircleShape)
+                .padding(4.dp)
+                .clip(CircleShape)
+                .background(color ?: Color.Transparent)
+                .then(if (color == null) Modifier.border(1.dp, outline, CircleShape) else Modifier)
+                .drawBehind {
+                    if (color == null) {
+                        drawLine(outline, Offset(size.width * 0.2f, size.height * 0.8f), Offset(size.width * 0.8f, size.height * 0.2f), 1.5.dp.toPx())
+                    }
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            if (isSelected && color != null) {
+                Icon(
+                    imageVector = TazIcons.Check,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = Color(0xFF1C1C1C) // dark check on every (mid-tone) accent reads clearly
+                )
+            }
         }
     }
 }

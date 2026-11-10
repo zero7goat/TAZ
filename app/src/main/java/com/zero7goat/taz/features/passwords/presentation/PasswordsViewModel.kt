@@ -1,14 +1,20 @@
 package com.zero7goat.taz.features.passwords.presentation
 
 import android.content.Context
+import android.os.Bundle
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.createSavedStateHandle
+import androidx.lifecycle.viewmodel.initializer
+import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.lifecycle.viewModelScope
 import com.zero7goat.taz.core.database.FolderEntity
 import com.zero7goat.taz.core.database.FolderModule
 import com.zero7goat.taz.core.database.FolderRepository
 import com.zero7goat.taz.core.database.TazDatabase
+import com.zero7goat.taz.core.security.FieldCipher
 import com.zero7goat.taz.core.security.FieldCipherException
 import com.zero7goat.taz.core.security.KeystoreFieldCipher
 import com.zero7goat.taz.core.ui.replaceAllText
@@ -114,8 +120,25 @@ class CredentialDraft(initial: CredentialDetail?) {
 
 class PasswordsViewModel(
     private val repository: CredentialRepository,
-    private val folderRepository: FolderRepository
+    private val folderRepository: FolderRepository,
+    private val savedState: SavedStateHandle = SavedStateHandle(),
+    private val draftCipher: FieldCipher? = null
 ) : ViewModel() {
+
+    // ---------- keeping unsaved typing ----------
+
+    /**
+     * A draft written before Android stopped the app process, waiting to be put back when the same
+     * login is opened again. Only ever held encrypted (see [snapshotDraft]).
+     */
+    private var pendingRestore: Bundle? = savedState.get<Bundle>(DRAFT_KEY)?.takeIf { it.containsKey(KEY_BLOB) }
+
+    init {
+        // Called by Android when the activity saves its state (going to the background, rotation,
+        // before the process may be stopped). Unsaved typing is encrypted with the device Keystore
+        // key first, so no login text ever lands in saved state as plain text.
+        savedState.setSavedStateProvider(DRAFT_KEY) { snapshotDraft() }
+    }
 
     // ---------- list and folders ----------
 
@@ -175,6 +198,31 @@ class PasswordsViewModel(
 
     fun deleteCredential(id: String) {
         viewModelScope.launch { repository.delete(id) }
+    }
+
+    // ---------- several logins at once ----------
+
+    /** Moves the logins to the trash (restorable for 30 days), never erases them. */
+    fun deleteCredentials(ids: Collection<String>) {
+        val targets = ids.toList()
+        viewModelScope.launch { targets.forEach { repository.delete(it) } }
+    }
+
+    fun moveCredentials(ids: Collection<String>, folderId: String?) {
+        val targets = ids.toList()
+        viewModelScope.launch { targets.forEach { repository.setFolder(it, folderId) } }
+    }
+
+    fun setFavorite(ids: Collection<String>, isFavorite: Boolean) {
+        val targets = ids.toList()
+        viewModelScope.launch { targets.forEach { repository.setFavorite(it, isFavorite) } }
+    }
+
+    /** Creates a folder inside [parentId] right away and returns its id (used by the folder picker). */
+    suspend fun createFolderNow(name: String, parentId: String?): String? {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return null
+        return folderRepository.createFolder(FolderModule.PASSWORDS, trimmed, parentId).id
     }
 
     private suspend fun effectiveFolderId(): String? {
@@ -269,26 +317,29 @@ class PasswordsViewModel(
                 if (current.credentialId == id && current.status != EditorStatus.Closed) return@withLock
 
                 _editor.value = CredentialEditorUi(credentialId = id, status = EditorStatus.Loading)
+                val restored = takePendingRestore(id)
                 when (val result = repository.getDetail(id)) {
                     is DetailResult.Found -> {
                         val detail = result.detail
-                        draft = CredentialDraft(detail)
+                        draft = CredentialDraft(detail).also { restored?.applyTo(it) }
                         _editor.value = CredentialEditorUi(
                             credentialId = id,
                             status = EditorStatus.Ready,
+                            isEditing = restored != null,
                             isFavorite = detail.isFavorite,
                             folderId = detail.folderId,
                             saved = detail
                         )
                     }
                     DetailResult.Missing -> {
-                        draft = CredentialDraft(null)
+                        draft = CredentialDraft(null).also { restored?.applyTo(it) }
                         _editor.value = CredentialEditorUi(
                             credentialId = id,
                             status = EditorStatus.Ready,
                             isNew = true,
                             isEditing = true,
-                            folderId = effectiveFolderId()
+                            isFavorite = restored?.isFavorite ?: false,
+                            folderId = if (restored != null) restored.folderId else effectiveFolderId()
                         )
                     }
                     DetailResult.Unreadable -> {
@@ -383,6 +434,27 @@ class PasswordsViewModel(
         }
     }
 
+    /**
+     * The app has just locked. A login that is only being viewed is wiped from memory (it is read
+     * again from the encrypted database after unlocking). A login with unsaved typing is kept as
+     * it is: the lock screen covers it. Wiping it here is what made users lose everything they had
+     * typed after briefly switching to another app.
+     */
+    fun onAppLocked() {
+        viewModelScope.launch {
+            editorLock.withLock {
+                if (!hasUnsavedTyping()) resetEditorLocked()
+            }
+        }
+    }
+
+    /** True while a new or edited login has text that has not been saved yet. */
+    fun hasUnsavedTyping(): Boolean {
+        val state = _editor.value
+        val current = draft ?: return false
+        return state.status == EditorStatus.Ready && state.isEditing && current.hasChanges(state.saved)
+    }
+
     /** Closes the login screen and wipes the in-memory text fields. */
     fun closeEditor() {
         viewModelScope.launch { editorLock.withLock { resetEditorLocked() } }
@@ -397,20 +469,84 @@ class PasswordsViewModel(
     override fun onCleared() {
         draft?.clear()
         draft = null
+        pendingRestore = null
         repository.clearCache()
     }
 
+    /** The unsaved draft, encrypted, for saved state. Empty when there is nothing worth keeping. */
+    private fun snapshotDraft(): Bundle {
+        val cipher = draftCipher ?: return Bundle()
+        val state = _editor.value
+        val current = draft
+        val id = state.credentialId
+        if (id == null || current == null || !hasUnsavedTyping()) {
+            // A draft restored from an earlier process but not opened yet is kept until it is used.
+            return pendingRestore ?: Bundle()
+        }
+        return try {
+            val fields = DraftFields(
+                serviceName = current.serviceName.text.toString(),
+                username = current.username.text.toString(),
+                password = current.password.text.toString(),
+                websiteUrl = current.websiteUrl.text.toString(),
+                notes = current.notes.text.toString()
+            )
+            Bundle().apply {
+                putString(KEY_ID, id)
+                putBoolean(KEY_FAVORITE, state.isFavorite)
+                putString(KEY_FOLDER, state.folderId)
+                putByteArray(KEY_BLOB, DraftSnapshot.encode(fields, id, cipher))
+            }
+        } catch (e: Exception) {
+            Bundle() // Never fall back to plain text.
+        }
+    }
+
+    private class RestoredDraft(
+        val fields: DraftFields,
+        val isFavorite: Boolean,
+        val folderId: String?
+    ) {
+        fun applyTo(target: CredentialDraft) {
+            target.serviceName.replaceAllText(fields.serviceName)
+            target.username.replaceAllText(fields.username)
+            target.password.replaceAllText(fields.password)
+            target.websiteUrl.replaceAllText(fields.websiteUrl)
+            target.notes.replaceAllText(fields.notes)
+        }
+    }
+
+    /** Decrypts and removes the pending draft if it belongs to [id]. */
+    private fun takePendingRestore(id: String): RestoredDraft? {
+        val bundle = pendingRestore ?: return null
+        if (bundle.getString(KEY_ID) != id) return null
+        pendingRestore = null
+        val cipher = draftCipher ?: return null
+        val blob = bundle.getByteArray(KEY_BLOB) ?: return null
+        // Unreadable (for example the key changed): start empty rather than fail.
+        val fields = DraftSnapshot.decode(blob, id, cipher) ?: return null
+        return RestoredDraft(fields, bundle.getBoolean(KEY_FAVORITE), bundle.getString(KEY_FOLDER))
+    }
+
     companion object {
+        private const val DRAFT_KEY = "credential_draft"
+        private const val KEY_ID = "id"
+        private const val KEY_FAVORITE = "favorite"
+        private const val KEY_FOLDER = "folder"
+        private const val KEY_BLOB = "blob"
+
         fun factory(context: Context): ViewModelProvider.Factory {
             val appContext = context.applicationContext
-            return object : ViewModelProvider.Factory {
-                @Suppress("UNCHECKED_CAST")
-                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+            return viewModelFactory {
+                initializer {
                     val database = TazDatabase.getInstance(appContext)
-                    return PasswordsViewModel(
-                        CredentialRepository(database.credentialDao(), KeystoreFieldCipher()),
-                        FolderRepository(database.folderDao())
-                    ) as T
+                    val cipher = KeystoreFieldCipher()
+                    PasswordsViewModel(
+                        CredentialRepository(database.credentialDao(), cipher),
+                        FolderRepository(database.folderDao()),
+                        createSavedStateHandle(),
+                        cipher
+                    )
                 }
             }
         }

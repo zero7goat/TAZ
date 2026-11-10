@@ -21,6 +21,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -235,13 +236,17 @@ fun AppNavigation(modifier: Modifier = Modifier) {
  */
 @Composable
 private fun ContentFrame(content: @Composable () -> Unit) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-        contentAlignment = Alignment.TopCenter
+    // A Surface (not a plain background) so every screen inherits the theme's content colour.
+    // Without it, icons drawn outside a Surface (back arrows, toolbar actions) fall back to
+    // black and disappear in the dark themes.
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+        contentColor = MaterialTheme.colorScheme.onBackground
     ) {
-        Box(modifier = Modifier.widthIn(max = ContentMaxWidth).fillMaxSize()) { content() }
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+            Box(modifier = Modifier.widthIn(max = ContentMaxWidth).fillMaxSize()) { content() }
+        }
     }
 }
 

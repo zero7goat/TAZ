@@ -14,7 +14,9 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.text.input.TextObfuscationMode
 import androidx.compose.material3.OutlinedSecureTextField
+import com.zero7goat.taz.features.passwords.presentation.RevealButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -135,6 +137,7 @@ fun BackupPassphraseDialog(
     val tooShort = first.length < MIN_PASSPHRASE_LENGTH
     val mismatch = confirm.text.isNotEmpty() && confirm.text.toString() != first
     val ready = !tooShort && confirm.text.toString() == first
+    var reveal by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Back up to a file") },
@@ -157,12 +160,16 @@ fun BackupPassphraseDialog(
                     state = passphrase,
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Passphrase") },
+                    textObfuscationMode = if (reveal) TextObfuscationMode.Visible else TextObfuscationMode.RevealLastTyped,
+                    trailingIcon = { RevealButton(reveal = reveal, onToggle = { reveal = !reveal }) },
                     supportingText = { Text("At least $MIN_PASSPHRASE_LENGTH characters") }
                 )
                 OutlinedSecureTextField(
                     state = confirm,
                     modifier = Modifier.fillMaxWidth(),
                     label = { Text("Repeat passphrase") },
+                    textObfuscationMode = if (reveal) TextObfuscationMode.Visible else TextObfuscationMode.RevealLastTyped,
+                    trailingIcon = { RevealButton(reveal = reveal, onToggle = { reveal = !reveal }) },
                     isError = mismatch,
                     supportingText = if (mismatch) ({ Text("Passphrases don't match") }) else null
                 )
@@ -177,6 +184,7 @@ fun BackupPassphraseDialog(
 @Composable
 fun RestoreConfirmDialog(passphrase: TextFieldState, onRestore: () -> Unit, onDismiss: () -> Unit) {
     var confirmed by remember { mutableStateOf(false) }
+    var reveal by remember { mutableStateOf(false) }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Restore from backup?") },
@@ -198,7 +206,9 @@ fun RestoreConfirmDialog(passphrase: TextFieldState, onRestore: () -> Unit, onDi
                 OutlinedSecureTextField(
                     state = passphrase,
                     modifier = Modifier.fillMaxWidth(),
-                    label = { Text("Backup passphrase") }
+                    label = { Text("Backup passphrase") },
+                    textObfuscationMode = if (reveal) TextObfuscationMode.Visible else TextObfuscationMode.RevealLastTyped,
+                    trailingIcon = { RevealButton(reveal = reveal, onToggle = { reveal = !reveal }) }
                 )
                 Row(
                     modifier = Modifier

@@ -6,6 +6,8 @@ import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -54,13 +56,22 @@ private fun TazAppContent(settings: AppSettings, lock: AppLockManager) {
 
     CompositionLocalProvider(LocalDensity provides scaledDensity) {
         TAZTheme(themeMode = settings.themeMode, fontFamily = AppFonts.familyFor(settings.fontKey)) {
-            AppLockGate(
-                lock = lock,
-                biometricEnabled = settings.biometricEnabled,
-                // Locking drops any decrypted login that was open on screen.
-                onLocked = { passwordsViewModel.closeEditor() }
+            // The root Surface gives everything below it, the lock screen included, the theme's
+            // background and content colour, so no icon can end up black on a dark background.
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = MaterialTheme.colorScheme.background,
+                contentColor = MaterialTheme.colorScheme.onBackground
             ) {
-                AppNavigation()
+                AppLockGate(
+                    lock = lock,
+                    biometricEnabled = settings.biometricEnabled,
+                    // Locking drops a decrypted login that is only being viewed. A login with unsaved
+                    // typing is kept (hidden behind the lock screen) so nothing typed is lost.
+                    onLocked = { passwordsViewModel.onAppLocked() }
+                ) {
+                    AppNavigation()
+                }
             }
         }
     }

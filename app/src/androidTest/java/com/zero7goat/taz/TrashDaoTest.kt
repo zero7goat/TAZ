@@ -104,6 +104,23 @@ class TrashDaoTest {
         assertNull(dao.getById("a"))
     }
 
+    @Test
+    fun deletingAFolderMovesItsContentsUpOneLevelAndLosesNothing() = runBlocking {
+        val folders = db.folderDao()
+        folders.upsert(com.zero7goat.taz.core.database.FolderEntity("parent", "NOTES", "Parent", null, 1))
+        folders.upsert(com.zero7goat.taz.core.database.FolderEntity("child", "NOTES", "Child", "parent", 2))
+        folders.upsert(com.zero7goat.taz.core.database.FolderEntity("grand", "NOTES", "Grand", "child", 3))
+        db.noteDao().upsert(note("in-child").copy(folderId = "child"))
+        db.noteDao().upsert(note("trashed-in-child", deletedAt = 5).copy(folderId = "child"))
+
+        folders.deleteKeepingContents(folders.getAll().first { it.id == "child" })
+
+        assertEquals("parent", db.noteDao().getById("in-child")?.folderId)
+        assertEquals("parent", db.noteDao().getById("trashed-in-child")?.folderId)
+        assertEquals("parent", folders.getAll().first { it.id == "grand" }.parentId)
+        assertTrue(folders.getAll().none { it.id == "child" })
+    }
+
     private fun login(id: String) = CredentialEntity(
         id = id, folderId = null, serviceName = "Service $id", websiteUrl = "", domain = "",
         usernameCipher = byteArrayOf(1, 2, 3), passwordCipher = byteArrayOf(4, 5, 6), noteCipher = byteArrayOf(7, 8, 9),

@@ -214,6 +214,121 @@ object TazIcons {
             }
         }
     }
+
+    val Eye: ImageVector by lazy {
+        tazIcon("Eye") {
+            outline(1.8f) {
+                moveTo(2.5f, 12f)
+                curveTo(4.8f, 7.6f, 8.2f, 5.5f, 12f, 5.5f)
+                curveTo(15.8f, 5.5f, 19.2f, 7.6f, 21.5f, 12f)
+                curveTo(19.2f, 16.4f, 15.8f, 18.5f, 12f, 18.5f)
+                curveTo(8.2f, 18.5f, 4.8f, 16.4f, 2.5f, 12f)
+                close()
+                circle(12f, 12f, 3f)
+            }
+        }
+    }
+
+    val EyeOff: ImageVector by lazy {
+        tazIcon("EyeOff") {
+            outline(1.8f) {
+                moveTo(9.9f, 5.8f)
+                curveTo(10.6f, 5.6f, 11.3f, 5.5f, 12f, 5.5f)
+                curveTo(15.8f, 5.5f, 19.2f, 7.6f, 21.5f, 12f)
+                curveTo(20.8f, 13.3f, 20f, 14.4f, 19.1f, 15.3f)
+                moveTo(16.2f, 17.4f)
+                curveTo(14.9f, 18.1f, 13.5f, 18.5f, 12f, 18.5f)
+                curveTo(8.2f, 18.5f, 4.8f, 16.4f, 2.5f, 12f)
+                curveTo(3.6f, 9.9f, 5f, 8.3f, 6.6f, 7.2f)
+                moveTo(9.9f, 9.9f)
+                curveTo(9.3f, 10.5f, 9f, 11.2f, 9f, 12f)
+                curveTo(9f, 13.7f, 10.3f, 15f, 12f, 15f)
+                curveTo(12.8f, 15f, 13.5f, 14.7f, 14.1f, 14.1f)
+                moveTo(3.5f, 3.5f); lineTo(20.5f, 20.5f)
+            }
+        }
+    }
+
+    val FolderPlus: ImageVector by lazy {
+        tazIcon("FolderPlus") {
+            outline(1.8f) {
+                moveTo(3.5f, 6.5f); horizontalLineTo(9.5f); lineTo(11.5f, 8.5f)
+                horizontalLineTo(20.5f); verticalLineTo(18.5f); horizontalLineTo(3.5f); close()
+                moveTo(12f, 11f); verticalLineTo(16f)
+                moveTo(9.5f, 13.5f); horizontalLineTo(14.5f)
+            }
+        }
+    }
+
+    val FolderMove: ImageVector by lazy {
+        tazIcon("FolderMove") {
+            outline(1.8f) {
+                moveTo(3.5f, 6.5f); horizontalLineTo(9.5f); lineTo(11.5f, 8.5f)
+                horizontalLineTo(20.5f); verticalLineTo(18.5f); horizontalLineTo(3.5f); close()
+                moveTo(9f, 13.5f); horizontalLineTo(15f)
+                moveTo(12.5f, 11f); lineTo(15f, 13.5f); lineTo(12.5f, 16f)
+            }
+        }
+    }
+
+    val More: ImageVector by lazy {
+        tazIcon("More") {
+            solid(1.2f) {
+                circle(12f, 5.5f, 1.1f)
+                circle(12f, 12f, 1.1f)
+                circle(12f, 18.5f, 1.1f)
+            }
+        }
+    }
+
+    val Close: ImageVector by lazy {
+        tazIcon("Close") {
+            outline(1.9f) {
+                moveTo(6f, 6f); lineTo(18f, 18f)
+                moveTo(18f, 6f); lineTo(6f, 18f)
+            }
+        }
+    }
+
+    val Check: ImageVector by lazy {
+        tazIcon("Check") {
+            outline(2.2f) {
+                moveTo(5f, 12.5f); lineTo(9.5f, 17f); lineTo(19f, 7.5f)
+            }
+        }
+    }
+
+    val SelectAll: ImageVector by lazy {
+        tazIcon("SelectAll") {
+            outline(1.8f) {
+                moveTo(4f, 4f); horizontalLineTo(20f); verticalLineTo(20f); horizontalLineTo(4f); close()
+                moveTo(8f, 12.3f); lineTo(10.8f, 15f); lineTo(16f, 9.5f)
+            }
+        }
+    }
+
+    val Shield: ImageVector by lazy {
+        tazIcon("Shield") {
+            outline(1.8f) {
+                moveTo(12f, 3.5f); lineTo(19f, 6.2f); verticalLineTo(11.5f)
+                curveTo(19f, 15.6f, 16.1f, 19f, 12f, 20.5f)
+                curveTo(7.9f, 19f, 5f, 15.6f, 5f, 11.5f)
+                verticalLineTo(6.2f); close()
+                moveTo(9f, 12f); lineTo(11.2f, 14.2f); lineTo(15.2f, 10f)
+            }
+        }
+    }
+
+    val Key: ImageVector by lazy {
+        tazIcon("Key") {
+            outline(1.8f) {
+                circle(8f, 15.5f, 3.8f)
+                moveTo(10.7f, 12.8f); lineTo(19.5f, 4f)
+                moveTo(16.5f, 7f); lineTo(19f, 9.5f)
+                moveTo(14.2f, 9.3f); lineTo(16.2f, 11.3f)
+            }
+        }
+    }
 }
 
 private fun tazIcon(name: String, block: ImageVector.Builder.() -> Unit): ImageVector =
