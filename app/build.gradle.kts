@@ -7,12 +7,13 @@ plugins {
 }
 
 android {
-    namespace = "com.zero7goat.tung"
+    namespace = "com.zero7goat.taz"
     compileSdk {
         version = release(37)
     }
 
     defaultConfig {
+        // DO NOT CHANGE: a different application id installs as a separate app and cannot update TAZ.
         applicationId = "com.zero7goat.tung"
         minSdk = 26
         targetSdk = 37

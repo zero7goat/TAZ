@@ -115,7 +115,7 @@ Then run `./gradlew assembleRelease`. Without this file the release APK is built
 ## Project structure
 
 ```
-app/src/main/java/com/zero7goat/tung/
+app/src/main/java/com/zero7goat/taz/
 ├── core/        # backup, crypto, database, security, settings, storage, navigation, shared UI
 └── features/    # notes, passwords, files, settings (data / domain / presentation)
 ```

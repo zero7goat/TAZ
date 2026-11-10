@@ -1,0 +1,343 @@
+package com.zero7goat.taz.features.notes.presentation
+
+import android.content.Context
+import android.net.Uri
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewModelScope
+import com.zero7goat.taz.core.database.FolderEntity
+import com.zero7goat.taz.core.database.FolderModule
+import com.zero7goat.taz.core.database.FolderRepository
+import com.zero7goat.taz.core.database.TazDatabase
+import com.zero7goat.taz.features.notes.data.NoteEntity
+import com.zero7goat.taz.features.notes.data.NoteImageStore
+import com.zero7goat.taz.features.notes.data.NoteRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+
+/**
+ * What the notes screen shows.
+ *
+ * While [isBrowsing] (no search, no favorites filter), [folders] and [notes] are the
+ * contents of [currentFolder] (or the top level). Otherwise they are results across all folders.
+ */
+data class NotesUiState(
+    val notes: List<NoteEntity> = emptyList(),
+    val folders: List<FolderEntity> = emptyList(),
+    val allFolders: List<FolderEntity> = emptyList(),
+    val currentFolder: FolderEntity? = null,
+    val path: List<FolderEntity> = emptyList(),
+    val isBrowsing: Boolean = true,
+    val isLoading: Boolean = true,
+    val hasContent: Boolean = false,
+    val favoritesOnly: Boolean = false
+)
+
+/** The note currently open in the editor. [noteId] is null when no editor is open. */
+data class EditorUiState(
+    val noteId: String? = null,
+    val folderId: String? = null,
+    val isLoaded: Boolean = false,
+    val isNewNote: Boolean = true,
+    val isDirty: Boolean = false,
+    val createdAt: Long = 0L,
+    val title: String = "",
+    val description: String = "",
+    val body: String = "",
+    val isFavorite: Boolean = false,
+    val isPinned: Boolean = false,
+    val colorIndex: Int = 0
+) {
+    val isBlank: Boolean
+        get() = title.isBlank() && description.isBlank() && body.isBlank()
+}
+
+class NotesViewModel(
+    private val repository: NoteRepository,
+    private val folderRepository: FolderRepository,
+    private val appContext: Context,
+    private val imageStore: NoteImageStore
+) : ViewModel() {
+
+    init {
+        // Images inserted into notes and later removed are cleaned up in the background.
+        viewModelScope.launch { runCatching { repository.cleanupUnusedImages() } }
+    }
+
+    // ---------- list and folders ----------
+
+    private val query = MutableStateFlow("")
+    private val favoritesOnly = MutableStateFlow(false)
+    private val currentFolderId = MutableStateFlow<String?>(null)
+
+    val uiState: StateFlow<NotesUiState> = combine(
+        repository.observeNotes(),
+        folderRepository.observeFolders(FolderModule.NOTES),
+        query,
+        favoritesOnly,
+        currentFolderId
+    ) { notes, folders, text, onlyFavorites, folderId ->
+        buildUiState(notes, folders, text, onlyFavorites, folderId)
+    }.flowOn(Dispatchers.Default)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NotesUiState())
+
+    fun onQueryChange(value: String) {
+        query.value = value
+    }
+
+    fun setFavoritesOnly(value: Boolean) {
+        favoritesOnly.value = value
+    }
+
+    /** Shows the contents of [folderId], or the top level when null. */
+    fun openFolder(folderId: String?) {
+        currentFolderId.value = folderId
+    }
+
+    fun createFolder(name: String) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) return
+        viewModelScope.launch {
+            folderRepository.createFolder(FolderModule.NOTES, trimmed, parentId = effectiveFolderId())
+        }
+    }
+
+    fun renameFolder(folder: FolderEntity, name: String) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty() || trimmed == folder.name) return
+        viewModelScope.launch { folderRepository.updateFolder(folder.copy(name = trimmed)) }
+    }
+
+    /** Deletes the folder and its subfolders. Notes inside are kept and move to the top level. */
+    fun deleteFolder(folder: FolderEntity) {
+        viewModelScope.launch { folderRepository.deleteFolder(folder) }
+    }
+
+    fun moveNote(note: NoteEntity, folderId: String?) {
+        viewModelScope.launch { repository.setFolder(note.id, folderId) }
+    }
+
+    fun togglePinned(note: NoteEntity) {
+        viewModelScope.launch { repository.setPinned(note.id, !note.isPinned) }
+    }
+
+    fun toggleFavorite(note: NoteEntity) {
+        viewModelScope.launch { repository.setFavorite(note.id, !note.isFavorite) }
+    }
+
+    fun deleteNote(note: NoteEntity) {
+        viewModelScope.launch { repository.deleteNote(note.id) }
+    }
+
+    /** Copies a picked image into private storage. The editor then inserts a reference to it. */
+    suspend fun importImage(uri: Uri): NoteImageImport = importNoteImage(appContext, imageStore, uri)
+
+    /** The folder being browsed, or null if none or if it no longer exists. */
+    private suspend fun effectiveFolderId(): String? {
+        val id = currentFolderId.value ?: return null
+        return if (folderRepository.getFolders(FolderModule.NOTES).any { it.id == id }) id else null
+    }
+
+    // ---------- editor ----------
+
+    private val _editor = MutableStateFlow(EditorUiState())
+    val editor: StateFlow<EditorUiState> = _editor.asStateFlow()
+
+    // Serializes opening, saving and closing so a quick close-and-reopen cannot race.
+    private val editorLock = Mutex()
+
+    /**
+     * Opens [noteId] for editing. An id with no stored note starts a new, empty note in the
+     * folder currently being browsed.
+     */
+    fun openEditor(noteId: String) {
+        viewModelScope.launch {
+            editorLock.withLock {
+                val current = _editor.value
+                if (current.noteId == noteId && current.isLoaded) return@withLock
+                val existing = repository.getNote(noteId)
+                _editor.value = if (existing != null) {
+                    EditorUiState(
+                        noteId = noteId,
+                        folderId = existing.folderId,
+                        isLoaded = true,
+                        isNewNote = false,
+                        createdAt = existing.createdAt,
+                        title = existing.title,
+                        description = existing.description,
+                        body = existing.body,
+                        isFavorite = existing.isFavorite,
+                        isPinned = existing.isPinned,
+                        colorIndex = existing.colorIndex
+                    )
+                } else {
+                    EditorUiState(
+                        noteId = noteId,
+                        folderId = effectiveFolderId(),
+                        isLoaded = true,
+                        isNewNote = true
+                    )
+                }
+            }
+        }
+    }
+
+    fun onTitleChange(value: String) =
+        updateEditor { if (it.title == value) it else it.copy(title = value, isDirty = true) }
+
+    fun onDescriptionChange(value: String) =
+        updateEditor { if (it.description == value) it else it.copy(description = value, isDirty = true) }
+
+    fun onBodyChange(value: String) =
+        updateEditor { if (it.body == value) it else it.copy(body = value, isDirty = true) }
+
+    fun onColorChange(index: Int) =
+        updateEditor { if (it.colorIndex == index) it else it.copy(colorIndex = index, isDirty = true) }
+
+    fun onFavoriteToggle() =
+        updateEditor { it.copy(isFavorite = !it.isFavorite, isDirty = true) }
+
+    fun onPinToggle() =
+        updateEditor { it.copy(isPinned = !it.isPinned, isDirty = true) }
+
+    /** Saves the open note if it changed. Used when the app goes to the background. */
+    fun saveDraft() {
+        viewModelScope.launch { editorLock.withLock { persistLocked() } }
+    }
+
+    /** Saves the open note if it changed, then closes the editor. */
+    fun closeEditor() {
+        viewModelScope.launch {
+            editorLock.withLock {
+                persistLocked()
+                _editor.value = EditorUiState()
+            }
+        }
+    }
+
+    /** Deletes the open note (if it was ever saved) and closes the editor. */
+    fun deleteCurrent() {
+        viewModelScope.launch {
+            editorLock.withLock {
+                _editor.value.noteId?.let { repository.deleteNote(it) }
+                _editor.value = EditorUiState()
+            }
+        }
+    }
+
+    private fun updateEditor(transform: (EditorUiState) -> EditorUiState) {
+        _editor.update { if (it.noteId == null || !it.isLoaded) it else transform(it) }
+    }
+
+    private suspend fun persistLocked() {
+        val draft = _editor.value
+        val id = draft.noteId ?: return
+        if (!draft.isLoaded || !draft.isDirty) return
+        if (draft.isNewNote && draft.isBlank) return // never save an empty new note
+
+        val saved = repository.save(
+            NoteEntity(
+                id = id,
+                folderId = draft.folderId,
+                title = draft.title,
+                description = draft.description,
+                body = draft.body,
+                createdAt = draft.createdAt,
+                updatedAt = 0L,
+                isFavorite = draft.isFavorite,
+                isPinned = draft.isPinned,
+                colorIndex = draft.colorIndex
+            )
+        )
+        _editor.update {
+            if (it.noteId == id) it.copy(isNewNote = false, isDirty = false, createdAt = saved.createdAt) else it
+        }
+    }
+
+    companion object {
+        fun factory(context: Context): ViewModelProvider.Factory {
+            val appContext = context.applicationContext
+            return object : ViewModelProvider.Factory {
+                @Suppress("UNCHECKED_CAST")
+                override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                    val database = TazDatabase.getInstance(appContext)
+                    val images = NoteImageStore(appContext.filesDir)
+                    return NotesViewModel(
+                        NoteRepository(database.noteDao(), images),
+                        FolderRepository(database.folderDao()),
+                        appContext,
+                        images
+                    ) as T
+                }
+            }
+        }
+    }
+}
+
+private fun buildUiState(
+    allNotes: List<NoteEntity>,
+    allFolders: List<FolderEntity>,
+    text: String,
+    onlyFavorites: Boolean,
+    folderId: String?
+): NotesUiState {
+    val folderById = allFolders.associateBy { it.id }
+    val current = folderId?.let { folderById[it] }
+    val needle = text.trim()
+    val browsing = needle.isEmpty() && !onlyFavorites
+
+    val notes: List<NoteEntity>
+    val folders: List<FolderEntity>
+    if (browsing) {
+        folders = allFolders.filter { it.parentId == current?.id }
+        notes = allNotes.filter { note ->
+            val noteFolderId = note.folderId
+            if (current == null) {
+                // Top level also catches a note whose folder no longer exists.
+                noteFolderId == null || noteFolderId !in folderById
+            } else {
+                noteFolderId == current.id
+            }
+        }
+    } else {
+        folders = if (needle.isNotEmpty() && !onlyFavorites) {
+            allFolders.filter { it.name.contains(needle, ignoreCase = true) }
+        } else {
+            emptyList()
+        }
+        notes = allNotes.filter { note ->
+            (!onlyFavorites || note.isFavorite) && (needle.isEmpty() || note.matches(needle))
+        }
+    }
+
+    val path = generateSequence(current) { folder -> folder.parentId?.let { folderById[it] } }
+        .toList()
+        .asReversed()
+
+    return NotesUiState(
+        notes = notes,
+        folders = folders,
+        allFolders = allFolders,
+        currentFolder = current,
+        path = path,
+        isBrowsing = browsing,
+        isLoading = false,
+        hasContent = allNotes.isNotEmpty() || allFolders.isNotEmpty(),
+        favoritesOnly = onlyFavorites
+    )
+}
+
+private fun NoteEntity.matches(needle: String): Boolean =
+    title.contains(needle, ignoreCase = true) ||
+        description.contains(needle, ignoreCase = true) ||
+        body.contains(needle, ignoreCase = true)

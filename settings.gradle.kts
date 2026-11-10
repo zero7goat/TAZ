@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "TUNG"
+rootProject.name = "TAZ"
 include(":app")

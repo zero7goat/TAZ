@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-    TUNG does not use Android Auto Backup (API 26-30 rules; API 31+ uses
+    TAZ does not use Android Auto Backup (API 26-30 rules; API 31+ uses
     data_extraction_rules.xml). All app data is excluded explicitly, in
     addition to android:allowBackup="false" in the manifest.
 
-    TUNG's own local backup/restore is a separate, user-initiated feature
+    TAZ's own local backup/restore is a separate, user-initiated feature
     that writes to a user-chosen location and does not rely on this system.
 -->
 <full-backup-content>
