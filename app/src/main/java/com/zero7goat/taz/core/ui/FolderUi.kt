@@ -87,7 +87,9 @@ fun FolderNameDialog(
     confirmLabel: String,
     onConfirm: (String) -> Unit,
     onDismiss: () -> Unit,
-    location: String? = null
+    location: String? = null,
+    fieldLabel: String = "Folder name",
+    error: String? = null
 ) {
     var value by remember {
         mutableStateOf(TextFieldValue(initialName, selection = TextRange(0, initialName.length)))
@@ -114,7 +116,9 @@ fun FolderNameDialog(
                     modifier = Modifier
                         .fillMaxWidth()
                         .focusRequester(focus),
-                    label = { Text("Folder name") },
+                    label = { Text(fieldLabel) },
+                    isError = error != null,
+                    supportingText = error?.let { message -> { Text(message) } },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(
                         capitalization = KeyboardCapitalization.Sentences,

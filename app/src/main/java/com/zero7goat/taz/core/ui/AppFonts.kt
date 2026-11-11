@@ -41,6 +41,9 @@ object AppFonts {
         Option("dejavu_mono", "DejaVu Sans Mono", dejavuMono)
     )
 
+    /** The bundled monospace font, for code and text files whatever the app font is. */
+    val monospace: FontFamily get() = dejavuMono
+
     fun familyFor(key: String): FontFamily = options.firstOrNull { it.key == key }?.family ?: FontFamily.Default
 
     fun labelFor(key: String): String = options.firstOrNull { it.key == key }?.label ?: options.first().label

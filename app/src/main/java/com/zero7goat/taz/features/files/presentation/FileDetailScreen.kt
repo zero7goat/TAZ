@@ -1,6 +1,14 @@
 package com.zero7goat.taz.features.files.presentation
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.zero7goat.taz.core.tags.TagTarget
+import com.zero7goat.taz.core.ui.TagPickerSheet
+import com.zero7goat.taz.core.ui.TagsSection
+import com.zero7goat.taz.features.files.domain.PreviewKind
+import com.zero7goat.taz.features.files.domain.previewKind
+import com.zero7goat.taz.features.tags.TagsViewModel
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -39,6 +47,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zero7goat.taz.core.storage.extensionOf
 import com.zero7goat.taz.core.ui.TazIcons
+import com.zero7goat.taz.core.ui.AnimatedIcon
 import com.zero7goat.taz.features.files.data.FileEntity
 import com.zero7goat.taz.features.files.domain.fileCategory
 import com.zero7goat.taz.features.files.domain.formatFileSize
@@ -96,8 +105,63 @@ private fun DetailContent(file: FileEntity, viewModel: FilesViewModel, onClose: 
         }
     }
 
-    fun external(action: ExternalAction) {
-        scope.launch { launchExternal(context, viewModel, file, action) { showMessage(it) } }
+    fun external(action: ExternalAction, target: FileEntity = file) {
+        scope.launch { launchExternal(context, viewModel, target, action) { showMessage(it) } }
+    }
+
+    val tagsViewModel: TagsViewModel = viewModel(factory = TagsViewModel.factory(context.applicationContext))
+    val allTags by tagsViewModel.tags.collectAsStateWithLifecycle()
+    val fileTags by remember(file.id) { tagsViewModel.itemTags(TagTarget.FILE, file.id) }.collectAsStateWithLifecycle(emptyList())
+    var pickingTags by remember { mutableStateOf(false) }
+    // The full-screen viewer (images, PDF, text). Saved so rotation keeps it open.
+    var viewerOpen by rememberSaveable(file.id) { mutableStateOf(false) }
+    val kind = previewKind(file.mimeType, file.displayName)
+
+    if (viewerOpen && !isMissing && preview !is PreviewState.Failed) {
+        when (kind) {
+            PreviewKind.IMAGE -> {
+                // Swiping moves through the images of the same folder, in name order.
+                val allFiles by remember { viewModel.observeAllFiles() }.collectAsStateWithLifecycle(listOf(file))
+                val images = remember(allFiles, file) {
+                    allFiles.filter {
+                        it.folderId == file.folderId && previewKind(it.mimeType, it.displayName) == PreviewKind.IMAGE
+                    }.sortedBy { it.displayName.lowercase() }.ifEmpty { listOf(file) }
+                }
+                ImageViewer(
+                    images = if (images.any { it.id == file.id }) images else listOf(file),
+                    startId = file.id,
+                    resolveBlob = viewModel::resolveBlob,
+                    onClose = { viewerOpen = false },
+                    onShare = { external(ExternalAction.SHARE, it) },
+                    onOpen = { external(ExternalAction.OPEN, it) }
+                )
+                return
+            }
+            PreviewKind.PDF -> {
+                val document = (preview as? PreviewState.Pdf)?.document
+                if (document != null) {
+                    PdfViewer(
+                        file = file,
+                        document = document,
+                        onClose = { viewerOpen = false },
+                        onShare = { external(ExternalAction.SHARE) },
+                        onOpen = { external(ExternalAction.OPEN) }
+                    )
+                    return
+                }
+            }
+            PreviewKind.TEXT -> {
+                TextViewer(
+                    file = file,
+                    resolveBlob = viewModel::resolveBlob,
+                    onClose = { viewerOpen = false },
+                    onShare = { external(ExternalAction.SHARE) },
+                    onOpen = { external(ExternalAction.OPEN) }
+                )
+                return
+            }
+            PreviewKind.NONE -> Unit
+        }
     }
 
     BackHandler(onBack = onClose)
@@ -117,8 +181,12 @@ private fun DetailContent(file: FileEntity, viewModel: FilesViewModel, onClose: 
                     description = if (file.isFavorite) "Remove from favorites" else "Add to favorites",
                     onClick = { viewModel.toggleFavorite(file) }
                 )
-                TextButton(onClick = { external(ExternalAction.SHARE) }, enabled = !isMissing) { Text("Share") }
-                TextButton(onClick = { external(ExternalAction.OPEN) }, enabled = !isMissing) { Text("Open") }
+                IconButton(onClick = { external(ExternalAction.SHARE) }, enabled = !isMissing) {
+                    Icon(TazIcons.Share, contentDescription = "Share")
+                }
+                IconButton(onClick = { external(ExternalAction.OPEN) }, enabled = !isMissing) {
+                    Icon(TazIcons.OpenExternal, contentDescription = "Open in another app")
+                }
                 BarButton(TazIcons.Trash, "Delete", onClick = { confirmDelete = true })
             }
 
@@ -143,7 +211,16 @@ private fun DetailContent(file: FileEntity, viewModel: FilesViewModel, onClose: 
                         )
                     }
                 }
-                previewItems(preview, file.displayName, pageWidthPx)
+                previewItems(preview, file.displayName, pageWidthPx, onOpenViewer = { viewerOpen = true })
+                item(key = "tags") {
+                    TagsSection(
+                        tags = fileTags,
+                        editable = true,
+                        onEdit = { pickingTags = true },
+                        onRemove = { tagsViewModel.removeTag(TagTarget.FILE, file.id, it.id) },
+                        modifier = Modifier.padding(top = 20.dp)
+                    )
+                }
                 item(key = "details") {
                     DetailsSection(file = file, onEdit = { showEdit = true })
                 }
@@ -154,6 +231,19 @@ private fun DetailContent(file: FileEntity, viewModel: FilesViewModel, onClose: 
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .systemBarsPadding()
+        )
+    }
+
+    if (pickingTags) {
+        TagPickerSheet(
+            allTags = allTags,
+            initiallySelected = fileTags.mapTo(HashSet()) { it.id },
+            onCreate = { tagsViewModel.createOrGet(it) },
+            onDone = { ids ->
+                tagsViewModel.setItemTags(TagTarget.FILE, file.id, ids)
+                pickingTags = false
+            },
+            onDismiss = { pickingTags = false }
         )
     }
 
@@ -235,7 +325,7 @@ private fun DetailRow(label: String, value: String) {
 @Composable
 private fun BarButton(icon: ImageVector, description: String, onClick: () -> Unit) {
     IconButton(onClick = onClick) {
-        Icon(imageVector = icon, contentDescription = description)
+        AnimatedIcon(icon = icon, contentDescription = description)
     }
 }
 

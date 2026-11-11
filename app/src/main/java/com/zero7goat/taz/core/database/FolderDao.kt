@@ -18,6 +18,9 @@ interface FolderDao {
     @Query("SELECT * FROM folders WHERE module = :module ORDER BY name ASC")
     suspend fun getByModule(module: String): List<FolderEntity>
 
+    @Query("SELECT * FROM folders ORDER BY name COLLATE NOCASE ASC")
+    fun observeAll(): Flow<List<FolderEntity>>
+
     @Upsert
     suspend fun upsert(folder: FolderEntity)
 

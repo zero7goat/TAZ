@@ -9,6 +9,16 @@ import com.zero7goat.taz.core.database.FolderEntity
 import com.zero7goat.taz.core.database.FolderModule
 import com.zero7goat.taz.core.database.FolderRepository
 import com.zero7goat.taz.core.database.TazDatabase
+import com.zero7goat.taz.core.fields.CustomField
+import com.zero7goat.taz.core.fields.CustomFields
+import com.zero7goat.taz.core.security.FieldCipherException
+import com.zero7goat.taz.core.security.KeystoreFieldCipher
+import com.zero7goat.taz.core.tags.Tag
+import com.zero7goat.taz.core.tags.TagRepository
+import com.zero7goat.taz.core.tags.TagTarget
+import com.zero7goat.taz.features.notes.data.NoteFieldsLoad
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
 import com.zero7goat.taz.features.notes.data.NoteEntity
 import com.zero7goat.taz.features.notes.data.NoteImageStore
 import com.zero7goat.taz.features.notes.data.NoteRepository
@@ -43,7 +53,9 @@ data class NotesUiState(
     val hasContent: Boolean = false,
     val favoritesOnly: Boolean = false,
     /** The search text (trimmed), used to show why a note matched. Empty when not searching. */
-    val query: String = ""
+    val query: String = "",
+    /** Tags of each note, by id. */
+    val tags: Map<String, List<Tag>> = emptyMap()
 )
 
 /** The note currently open in the editor. [noteId] is null when no editor is open. */
@@ -59,18 +71,27 @@ data class EditorUiState(
     val body: String = "",
     val isFavorite: Boolean = false,
     val isPinned: Boolean = false,
-    val colorIndex: Int = 0
+    val colorIndex: Int = 0,
+    /** Custom fields, decrypted. Only kept in memory. */
+    val fields: List<CustomField> = emptyList(),
+    /** False when stored fields exist but cannot be decrypted: they are then never overwritten. */
+    val fieldsReadable: Boolean = true
 ) {
     val isBlank: Boolean
-        get() = title.isBlank() && description.isBlank() && body.isBlank()
+        get() = title.isBlank() && description.isBlank() && body.isBlank() &&
+            fields.none { it.value.isNotEmpty() && it.value != CustomFields.FALSE }
 }
 
 class NotesViewModel(
     private val repository: NoteRepository,
     private val folderRepository: FolderRepository,
     private val appContext: Context,
-    private val imageStore: NoteImageStore
+    private val imageStore: NoteImageStore,
+    tagRepository: TagRepository? = null
 ) : ViewModel() {
+
+    private val tagsByNote: Flow<Map<String, List<Tag>>> =
+        tagRepository?.observeTagsByItem(TagTarget.NOTE) ?: flowOf(emptyMap())
 
     init {
         // Images inserted into notes and later removed are cleaned up in the background.
@@ -83,14 +104,17 @@ class NotesViewModel(
     private val favoritesOnly = MutableStateFlow(false)
     private val currentFolderId = MutableStateFlow<String?>(null)
 
+    private val filters = combine(query, favoritesOnly, currentFolderId) { text, onlyFavorites, folderId ->
+        Triple(text, onlyFavorites, folderId)
+    }
+
     val uiState: StateFlow<NotesUiState> = combine(
         repository.observeNotes(),
         folderRepository.observeFolders(FolderModule.NOTES),
-        query,
-        favoritesOnly,
-        currentFolderId
-    ) { notes, folders, text, onlyFavorites, folderId ->
-        buildUiState(notes, folders, text, onlyFavorites, folderId)
+        filters,
+        tagsByNote
+    ) { notes, folders, (text, onlyFavorites, folderId), tags ->
+        buildUiState(notes, folders, text, onlyFavorites, folderId, tags)
     }.flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NotesUiState())
 
@@ -200,8 +224,11 @@ class NotesViewModel(
                 val current = _editor.value
                 if (current.noteId == noteId && current.isLoaded) return@withLock
                 val existing = repository.getNote(noteId)
+                val loadedFields = if (existing != null) repository.loadFields(noteId) else NoteFieldsLoad.Ok(emptyList())
                 _editor.value = if (existing != null) {
                     EditorUiState(
+                        fields = (loadedFields as? NoteFieldsLoad.Ok)?.fields.orEmpty(),
+                        fieldsReadable = loadedFields is NoteFieldsLoad.Ok,
                         noteId = noteId,
                         folderId = existing.folderId,
                         isLoaded = true,
@@ -234,6 +261,9 @@ class NotesViewModel(
 
     fun onBodyChange(value: String) =
         updateEditor { if (it.body == value) it else it.copy(body = value, isDirty = true) }
+
+    fun onFieldsChange(fields: List<CustomField>) =
+        updateEditor { if (!it.fieldsReadable || it.fields == fields) it else it.copy(fields = fields, isDirty = true) }
 
     fun onColorChange(index: Int) =
         updateEditor { if (it.colorIndex == index) it else it.copy(colorIndex = index, isDirty = true) }
@@ -279,20 +309,34 @@ class NotesViewModel(
         if (!draft.isLoaded || !draft.isDirty) return
         if (draft.isNewNote && draft.isBlank) return // never save an empty new note
 
-        val saved = repository.save(
-            NoteEntity(
-                id = id,
-                folderId = draft.folderId,
-                title = draft.title,
-                description = draft.description,
-                body = draft.body,
-                createdAt = draft.createdAt,
-                updatedAt = 0L,
-                isFavorite = draft.isFavorite,
-                isPinned = draft.isPinned,
-                colorIndex = draft.colorIndex
+        val saved = try {
+            repository.save(
+                NoteEntity(
+                    id = id,
+                    folderId = draft.folderId,
+                    title = draft.title,
+                    description = draft.description,
+                    body = draft.body,
+                    createdAt = draft.createdAt,
+                    updatedAt = 0L,
+                    isFavorite = draft.isFavorite,
+                    isPinned = draft.isPinned,
+                    colorIndex = draft.colorIndex
+                ),
+                // Unreadable fields are left exactly as stored, never replaced.
+                fields = if (draft.fieldsReadable) draft.fields else null
             )
-        )
+        } catch (e: FieldCipherException) {
+            // The key is unavailable: save the note itself and keep the stored fields as they were.
+            repository.save(
+                NoteEntity(
+                    id = id, folderId = draft.folderId, title = draft.title, description = draft.description,
+                    body = draft.body, createdAt = draft.createdAt, updatedAt = 0L, isFavorite = draft.isFavorite,
+                    isPinned = draft.isPinned, colorIndex = draft.colorIndex
+                ),
+                fields = null
+            )
+        }
         _editor.update {
             if (it.noteId == id) it.copy(isNewNote = false, isDirty = false, createdAt = saved.createdAt) else it
         }
@@ -307,10 +351,11 @@ class NotesViewModel(
                     val database = TazDatabase.getInstance(appContext)
                     val images = NoteImageStore(appContext.filesDir)
                     return NotesViewModel(
-                        NoteRepository(database.noteDao(), images),
+                        NoteRepository(database.noteDao(), images, cipher = KeystoreFieldCipher()),
                         FolderRepository(database.folderDao()),
                         appContext,
-                        images
+                        images,
+                        TagRepository(database.tagDao())
                     ) as T
                 }
             }
@@ -323,7 +368,8 @@ private fun buildUiState(
     allFolders: List<FolderEntity>,
     text: String,
     onlyFavorites: Boolean,
-    folderId: String?
+    folderId: String?,
+    tags: Map<String, List<Tag>>
 ): NotesUiState {
     val folderById = allFolders.associateBy { it.id }
     val current = folderId?.let { folderById[it] }
@@ -350,7 +396,7 @@ private fun buildUiState(
             emptyList()
         }
         notes = allNotes.filter { note ->
-            (!onlyFavorites || note.isFavorite) && (needle.isEmpty() || note.matches(needle))
+            (!onlyFavorites || note.isFavorite) && (needle.isEmpty() || note.matches(needle, tags[note.id].orEmpty()))
         }
     }
 
@@ -368,8 +414,11 @@ private fun buildUiState(
         isLoading = false,
         hasContent = allNotes.isNotEmpty() || allFolders.isNotEmpty(),
         favoritesOnly = onlyFavorites,
-        query = needle
+        query = needle,
+        tags = tags
     )
 }
 
-private fun NoteEntity.matches(needle: String): Boolean = NoteSearch.matches(title, description, body, needle)
+/** Every word must appear in the title, description, text or a tag name of the note. */
+private fun NoteEntity.matches(needle: String, tags: List<Tag>): Boolean =
+    NoteSearch.matches(title, description, body + "\n" + tags.joinToString(" ") { it.name }, needle)

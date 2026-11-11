@@ -2,6 +2,7 @@
 
 package com.zero7goat.taz.core.ui
 
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -269,5 +270,25 @@ fun SearchField(state: TextFieldState, hint: String, modifier: Modifier = Modifi
                 )
             }
         }
+    }
+}
+
+/**
+ * An icon that swaps with a short scale and fade (favorite, pin, reveal), so a toggle gives subtle
+ * feedback without moving anything else.
+ */
+@Composable
+fun AnimatedIcon(icon: ImageVector, contentDescription: String?, modifier: Modifier = Modifier) {
+    androidx.compose.animation.AnimatedContent(
+        targetState = icon,
+        modifier = modifier,
+        transitionSpec = {
+            (androidx.compose.animation.scaleIn(androidx.compose.animation.core.tween(180), initialScale = 0.6f) +
+                androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(120))) togetherWith
+                androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(80))
+        },
+        label = "icon"
+    ) { shown ->
+        Icon(imageVector = shown, contentDescription = contentDescription)
     }
 }

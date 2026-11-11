@@ -119,7 +119,39 @@ object TazMigrations {
         }
     }
 
+    /**
+     * Version 7: tags, categories and custom fields.
+     *
+     * Only adds: four new, empty tables and two columns on `credentials`. Every existing login gets
+     * the category "login" (what every entry was before) and no custom fields (NULL). No existing
+     * row, value or ciphertext is read, changed or re-encrypted. Room runs a migration inside one
+     * transaction, so if any statement fails nothing is applied and the version stays 6.
+     */
+    val MIGRATION_6_7_SQL: List<String> = listOf(
+        "CREATE TABLE IF NOT EXISTS `tags` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, " +
+            "`normalizedName` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "CREATE UNIQUE INDEX IF NOT EXISTS `index_tags_normalizedName` ON `tags` (`normalizedName`)",
+        "CREATE TABLE IF NOT EXISTS `item_tags` (`tagId` TEXT NOT NULL, `itemType` TEXT NOT NULL, " +
+            "`itemId` TEXT NOT NULL, PRIMARY KEY(`tagId`, `itemType`, `itemId`), " +
+            "FOREIGN KEY(`tagId`) REFERENCES `tags`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "CREATE INDEX IF NOT EXISTS `index_item_tags_itemType_itemId` ON `item_tags` (`itemType`, `itemId`)",
+        "CREATE INDEX IF NOT EXISTS `index_item_tags_tagId` ON `item_tags` (`tagId`)",
+        "CREATE TABLE IF NOT EXISTS `credential_categories` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, " +
+            "`icon` TEXT NOT NULL, `fieldsJson` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "CREATE TABLE IF NOT EXISTS `note_fields` (`noteId` TEXT NOT NULL, `fieldsCipher` BLOB NOT NULL, " +
+            "PRIMARY KEY(`noteId`), FOREIGN KEY(`noteId`) REFERENCES `notes`(`id`) " +
+            "ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "ALTER TABLE `credentials` ADD COLUMN `category` TEXT NOT NULL DEFAULT 'login'",
+        "ALTER TABLE `credentials` ADD COLUMN `fieldsCipher` BLOB"
+    )
+
+    val MIGRATION_6_7: Migration = object : Migration(6, 7) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            MIGRATION_6_7_SQL.forEach { db.execSQL(it) }
+        }
+    }
+
     val ALL: Array<Migration> = arrayOf(
-        MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6
+        MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7
     )
 }

@@ -42,7 +42,9 @@ class PasswordHealthViewModel(private val repository: CredentialRepository) : Vi
             _state.value = try {
                 val (details, unreadable) = repository.decryptAllForBackup()
                 val report = withContext(Dispatchers.Default) {
-                    val inputs = details.map { HealthInput(it.id, it.serviceName, it.password, it.updatedAt) }
+                    // Entries without a password (Wi-Fi, cards, notes ... stored in fields) are not checked.
+                    val inputs = details.filter { it.password.isNotEmpty() }
+                        .map { HealthInput(it.id, it.serviceName, it.password, it.updatedAt) }
                     PasswordHealth.analyze(inputs, System.currentTimeMillis(), unreadable)
                 }
                 HealthState.Ready(report)

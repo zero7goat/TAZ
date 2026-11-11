@@ -41,6 +41,18 @@ import com.zero7goat.taz.core.AppShortcuts
 import com.zero7goat.taz.core.ui.TazIcons
 import com.zero7goat.taz.features.passwords.presentation.PasswordHealthScreen
 import com.zero7goat.taz.features.trash.presentation.TrashScreen
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.zero7goat.taz.core.database.FolderModule
+import com.zero7goat.taz.core.ui.LocalOpenSearch
+import com.zero7goat.taz.features.files.presentation.FilesViewModel
+import com.zero7goat.taz.features.notes.presentation.NotesViewModel
+import com.zero7goat.taz.features.passwords.presentation.PasswordsViewModel
+import com.zero7goat.taz.features.search.presentation.SearchScreen
+import com.zero7goat.taz.features.passwords.presentation.CategoriesScreen
+import com.zero7goat.taz.features.tags.TagsScreen
 import java.util.UUID
 import com.zero7goat.taz.features.files.presentation.FileDetailScreen
 import com.zero7goat.taz.features.files.presentation.FilesScreen
@@ -72,6 +84,9 @@ private sealed interface Screen {
     data class FileViewer(val id: String) : Screen
     data object Trash : Screen
     data object PasswordHealth : Screen
+    data object Tags : Screen
+    data object Categories : Screen
+    data object Search : Screen
 }
 
 private val ContentMaxWidth = 720.dp
@@ -95,6 +110,10 @@ fun AppNavigation(modifier: Modifier = Modifier) {
     // Full-screen tools opened from Settings and Passwords.
     var showTrash by rememberSaveable { mutableStateOf(false) }
     var showPasswordHealth by rememberSaveable { mutableStateOf(false) }
+    var showTags by rememberSaveable { mutableStateOf(false) }
+    var showCategories by rememberSaveable { mutableStateOf(false) }
+    // Vault-wide search. Items opened from it come back to it when closed.
+    var showSearch by rememberSaveable { mutableStateOf(false) }
     val shellStateHolder = rememberSaveableStateHolder()
 
     // The home-screen "New note" shortcut. This composable only exists once TAZ is unlocked, so the
@@ -114,6 +133,12 @@ fun AppNavigation(modifier: Modifier = Modifier) {
         }
     }
 
+    // The same (activity-wide) instances the list screens use, so search can open a folder in them.
+    val appContext = LocalContext.current.applicationContext
+    val notesViewModel: NotesViewModel = viewModel(factory = NotesViewModel.factory(appContext))
+    val passwordsViewModel: PasswordsViewModel = viewModel(factory = PasswordsViewModel.factory(appContext))
+    val filesViewModel: FilesViewModel = viewModel(factory = FilesViewModel.factory(appContext))
+
     val snackbarHostState = remember { SnackbarHostState() }
     val scope = rememberCoroutineScope()
     val showMessage: (String) -> Unit = { message ->
@@ -130,8 +155,11 @@ fun AppNavigation(modifier: Modifier = Modifier) {
         openNoteId != null -> Screen.NoteEditor(openNoteId)
         openCredentialId != null -> Screen.PasswordEditor(openCredentialId)
         openFileId != null -> Screen.FileViewer(openFileId)
+        showSearch -> Screen.Search
         showPasswordHealth -> Screen.PasswordHealth
         showTrash -> Screen.Trash
+        showTags -> Screen.Tags
+        showCategories -> Screen.Categories
         else -> Screen.Shell
     }
 
@@ -139,17 +167,45 @@ fun AppNavigation(modifier: Modifier = Modifier) {
         targetState = screen,
         modifier = modifier,
         transitionSpec = {
-            if (targetState is Screen.Shell) {
-                // Back to the lists: a plain, quick fade.
-                fadeIn(tween(160)) togetherWith fadeOut(tween(120))
+            if (targetState.depth < initialState.depth) {
+                // Going back: a quick fade with a small slide the other way, so it reads as a step back.
+                (fadeIn(tween(160)) + slideInHorizontally(tween(200)) { -it / 20 }) togetherWith
+                    (fadeOut(tween(110)) + slideOutHorizontally(tween(160)) { it / 20 })
             } else {
-                // Opening an item: fade in with a small slide so it reads as a step forward.
+                // Opening something: fade in with a small slide so it reads as a step forward.
                 (fadeIn(tween(200)) + slideInHorizontally(tween(220)) { it / 14 }) togetherWith fadeOut(tween(120))
             }
         },
         label = "screen"
     ) { current ->
         when (current) {
+            Screen.Search -> ContentFrame {
+                SearchScreen(
+                    onClose = { showSearch = false },
+                    onOpenNote = { editingNoteId = it },
+                    onOpenLogin = { editingCredentialId = it },
+                    onOpenFile = { viewingFileId = it },
+                    onOpenFolder = { folder ->
+                        // Show the folder in its own section, exactly as if it had been opened there.
+                        when (folder.module) {
+                            FolderModule.NOTES.name -> {
+                                notesViewModel.openFolder(folder.id)
+                                currentPath = Route.Notes.path
+                            }
+                            FolderModule.PASSWORDS.name -> {
+                                passwordsViewModel.openFolder(folder.id)
+                                currentPath = Route.Passwords.path
+                            }
+                            else -> {
+                                filesViewModel.openFolder(folder.id)
+                                currentPath = Route.Files.path
+                            }
+                        }
+                        showSearch = false
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
             is Screen.NoteEditor -> ContentFrame {
                 NoteEditorScreen(
                     noteId = current.id,
@@ -181,9 +237,16 @@ fun AppNavigation(modifier: Modifier = Modifier) {
             Screen.Trash -> ContentFrame {
                 TrashScreen(onClose = { showTrash = false }, modifier = Modifier.fillMaxSize())
             }
+            Screen.Tags -> ContentFrame {
+                TagsScreen(onClose = { showTags = false }, modifier = Modifier.fillMaxSize())
+            }
+            Screen.Categories -> ContentFrame {
+                CategoriesScreen(onClose = { showCategories = false }, modifier = Modifier.fillMaxSize())
+            }
             Screen.Shell -> {
                 // Keeps list scroll position and search text while an editor is open.
                 shellStateHolder.SaveableStateProvider("shell") {
+                    CompositionLocalProvider(LocalOpenSearch provides { showSearch = true }) {
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),
                         snackbarHost = { SnackbarHost(snackbarHostState) },
@@ -217,6 +280,8 @@ fun AppNavigation(modifier: Modifier = Modifier) {
                                             onMessage = showMessage,
                                             onOpenTrash = { showTrash = true },
                                             onOpenPasswordHealth = { showPasswordHealth = true },
+                                            onOpenTags = { showTags = true },
+                                            onOpenCategories = { showCategories = true },
                                             modifier = screenModifier
                                         )
                                     }
@@ -224,11 +289,20 @@ fun AppNavigation(modifier: Modifier = Modifier) {
                             }
                         }
                     }
+                    }
                 }
             }
         }
     }
 }
+
+/** How deep a screen sits: lists, then tools and search, then a single item. Decides the transition direction. */
+private val Screen.depth: Int
+    get() = when (this) {
+        Screen.Shell -> 0
+        Screen.Search, Screen.Trash, Screen.PasswordHealth, Screen.Tags, Screen.Categories -> 1
+        is Screen.NoteEditor, is Screen.PasswordEditor, is Screen.FileViewer -> 2
+    }
 
 /**
  * Keeps content to a comfortable reading width on tablets and in landscape, while the background

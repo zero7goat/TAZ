@@ -1,5 +1,7 @@
 package com.zero7goat.taz.core.backup
 
+import com.zero7goat.taz.core.fields.CustomField
+import com.zero7goat.taz.core.fields.FieldType
 import com.zero7goat.taz.features.notes.data.NoteImageStore
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
@@ -345,7 +347,7 @@ class BackupArchiveTest {
     @Test
     fun unsupportedContentVersionIsRejected() {
         assertFails(BackupError.UNSUPPORTED_VERSION) {
-            readZip(zip("manifest.json" to manifest(version = 2).toByteArray(), *emptyData()))
+            readZip(zip("manifest.json" to manifest(version = 3).toByteArray(), *emptyData()))
         }
     }
 
@@ -390,5 +392,111 @@ class BackupArchiveTest {
         assertEquals(4, ordered.size)
         assertTrue(ordered.indexOf("a") < ordered.indexOf("b"))
         assertTrue(ordered.indexOf("b") < ordered.indexOf("c"))
+    }
+
+    // ---------- format version 2 (TAZ 1.2): tags, categories, custom fields ----------
+
+    private fun v2Contents(): BackupContents {
+        val base = sampleContents()
+        val noteField = CustomField("nf1", "Locker", FieldType.NUMBER, "42")
+        val secretField = CustomField("cf1", "Recovery code", FieldType.SECRET, "secret-field-marker")
+        val wifiField = CustomField("cf2", "Network name", FieldType.TEXT, "HomeNet")
+        return base.copy(
+            notes = base.notes.map { if (it.id == "n1") it.copy(fields = listOf(noteField)) else it },
+            credentials = listOf(
+                CredentialRecord(
+                    "c1", "f-logins", "Bank", "https://bank.example", "alice", "hunter2-marker", "PIN 1234", true, 5L, 6L,
+                    category = "custom:cat-1", fields = listOf(secretField, wifiField)
+                )
+            ),
+            tags = listOf(TagRecord("t1", "Work", 1L), TagRecord("t2", "Taxes 2026", 2L)),
+            tagLinks = listOf(
+                TagLinkRecord("t1", "NOTE", "n1"),
+                TagLinkRecord("t2", "FILE", "file-1"),
+                TagLinkRecord("t1", "LOGIN", "c1")
+            ),
+            categories = listOf(CategoryRecord("cat-1", "Membership", "star", """[{"label":"Member no.","type":"text","hidden":false}]""", 3L))
+        )
+    }
+
+    @Test
+    fun version2RoundTripsTagsCategoriesAndCustomFields() {
+        val contents = v2Contents()
+        val staged = restore(backup(contents).first)
+        assertEquals(contents.tags, staged.contents.tags)
+        assertEquals(contents.tagLinks.toSet(), staged.contents.tagLinks.toSet())
+        assertEquals(contents.categories, staged.contents.categories)
+        assertEquals(contents.notes, staged.contents.notes)
+        val login = staged.contents.credentials.single()
+        assertEquals("custom:cat-1", login.category)
+        assertEquals(contents.credentials.single().fields, login.fields)
+        assertTrue(login.fields.first().isHidden)
+    }
+
+    @Test
+    fun version2BackupNeverContainsPlaintextFieldValues() {
+        val text = String(backup(v2Contents()).first, Charsets.ISO_8859_1)
+        assertFalse(text.contains("secret-field-marker"))
+        assertFalse(text.contains("HomeNet"))
+        assertFalse(text.contains("Taxes 2026"))
+    }
+
+    @Test
+    fun version1BackupsFromTaz11StillRestoreWithNoTagsOrFields() {
+        // Exactly what TAZ 1.0 / 1.1 wrote: version 1, no tags or categories entries, no fields keys.
+        val notes = """[{"id":"n1","folderId":null,"title":"Old","description":"","body":"text","createdAt":1,
+            "updatedAt":2,"isFavorite":false,"isPinned":false,"colorIndex":0}]"""
+        val logins = """[{"id":"c1","folderId":null,"serviceName":"Old login","websiteUrl":"","username":"u",
+            "password":"p","notes":"","isFavorite":false,"createdAt":1,"updatedAt":2}]"""
+        val staged = readZip(
+            zip(
+                "manifest.json" to manifest(version = 1).toByteArray(),
+                "data/folders.json" to "[]".toByteArray(),
+                "data/notes.json" to notes.toByteArray(),
+                "data/credentials.json" to logins.toByteArray(),
+                "data/files.json" to "[]".toByteArray(),
+                "data/settings.json" to "{}".toByteArray()
+            )
+        )
+        assertEquals("Old", staged.contents.notes.single().title)
+        assertTrue(staged.contents.notes.single().fields.isEmpty())
+        assertEquals("login", staged.contents.credentials.single().category)
+        assertTrue(staged.contents.credentials.single().fields.isEmpty())
+        assertTrue(staged.contents.tags.isEmpty())
+        assertTrue(staged.contents.categories.isEmpty())
+    }
+
+    @Test
+    fun version2WithoutTheTagsEntryIsIncomplete() {
+        assertFails(BackupError.INCOMPLETE) {
+            readZip(zip("manifest.json" to manifest(version = 2).toByteArray(), *emptyData(), "data/categories.json" to "[]".toByteArray()))
+        }
+    }
+
+    @Test
+    fun tagsThatDifferOnlyInCaseOrSpacesAreRejected() {
+        val tags = """{"tags":[{"id":"a","name":"Work","createdAt":1},{"id":"b","name":"  work ","createdAt":2}],"links":[]}"""
+        assertFails(BackupError.INVALID_CONTENT) {
+            readZip(
+                zip(
+                    "manifest.json" to manifest(version = 2).toByteArray(), *emptyData(),
+                    "data/tags.json" to tags.toByteArray(), "data/categories.json" to "[]".toByteArray()
+                )
+            )
+        }
+    }
+
+    @Test
+    fun tagLinksToItemsNotInTheBackupAreDropped() {
+        val tags = """{"tags":[{"id":"a","name":"Work","createdAt":1}],
+            "links":[{"tagId":"a","itemType":"NOTE","itemId":"ghost"},{"tagId":"missing","itemType":"FILE","itemId":"x"}]}"""
+        val staged = readZip(
+            zip(
+                "manifest.json" to manifest(version = 2).toByteArray(), *emptyData(),
+                "data/tags.json" to tags.toByteArray(), "data/categories.json" to "[]".toByteArray()
+            )
+        )
+        assertEquals(1, staged.contents.tags.size)
+        assertTrue(staged.contents.tagLinks.isEmpty())
     }
 }

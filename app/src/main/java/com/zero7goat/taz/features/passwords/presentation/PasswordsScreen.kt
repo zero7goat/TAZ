@@ -29,6 +29,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import com.zero7goat.taz.core.tags.Tag
+import com.zero7goat.taz.core.ui.TagChipLine
+import com.zero7goat.taz.features.passwords.domain.Categories
+import com.zero7goat.taz.features.passwords.domain.LoginCategory
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -63,6 +71,8 @@ import com.zero7goat.taz.core.ui.SelectableRow
 import com.zero7goat.taz.core.ui.SelectionAction
 import com.zero7goat.taz.core.ui.TazFab
 import com.zero7goat.taz.core.ui.TazIcons
+import com.zero7goat.taz.features.tags.BulkTagSheet
+import com.zero7goat.taz.core.tags.TagTarget
 import com.zero7goat.taz.core.ui.folderPathLabel
 import com.zero7goat.taz.core.ui.keepVisible
 import com.zero7goat.taz.core.ui.rememberSelection
@@ -97,6 +107,7 @@ fun PasswordsScreen(
     var selection by rememberSelection()
     var moving by remember { mutableStateOf<Set<String>?>(null) }
     var trashing by remember { mutableStateOf<Set<String>?>(null) }
+    var tagging by remember { mutableStateOf<Set<String>?>(null) }
     var creatingFolder by remember { mutableStateOf(false) }
     var folderToRename by remember { mutableStateOf<FolderEntity?>(null) }
     var folderToDelete by remember { mutableStateOf<FolderEntity?>(null) }
@@ -137,7 +148,8 @@ fun PasswordsScreen(
                         SelectionAction("Remove from favorites") { viewModel.setFavorite(selection, false) }
                     } else {
                         SelectionAction("Add to favorites") { viewModel.setFavorite(selection, true) }
-                    }
+                    },
+                    SelectionAction("Add tags") { tagging = selection }
                 ),
                 actions = {
                     IconButton(onClick = { showGenerator = true }) {
@@ -152,7 +164,44 @@ fun PasswordsScreen(
                 favoritesOnly = state.favoritesOnly,
                 onFavoritesOnlyChange = viewModel::setFavoritesOnly,
                 canCreateFolder = state.isBrowsing && !selecting,
-                onNewFolder = { creatingFolder = true }
+                onNewFolder = { creatingFolder = true },
+                extra = {
+                    // Filter by category (Wi-Fi, cards, ...) across all folders.
+                    var open by remember { mutableStateOf(false) }
+                    val active = state.categoryFilter?.let { Categories.resolve(it, state.categories) }
+                    Box {
+                        FilterChip(
+                            selected = active != null,
+                            onClick = { open = true },
+                            label = { Text(active?.name ?: "Category") },
+                            leadingIcon = {
+                                Icon(
+                                    active?.icon?.vector() ?: TazIcons.Category,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(FilterChipDefaults.IconSize)
+                                )
+                            }
+                        )
+                        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                            DropdownMenuItem(
+                                text = { Text("All categories") },
+                                onClick = { open = false; viewModel.setCategoryFilter(null) }
+                            )
+                            state.categories.forEach { category ->
+                                DropdownMenuItem(
+                                    text = { Text(category.name) },
+                                    leadingIcon = { Icon(category.icon.vector(), contentDescription = null) },
+                                    trailingIcon = if (category.key == state.categoryFilter) {
+                                        { Icon(TazIcons.Check, contentDescription = "Selected") }
+                                    } else {
+                                        null
+                                    },
+                                    onClick = { open = false; viewModel.setCategoryFilter(category.key) }
+                                )
+                            }
+                        }
+                    }
+                }
             )
             if (state.isBrowsing && state.currentFolder != null) {
                 FolderPathRow(rootLabel = "Passwords", path = state.path, onNavigate = openFolder)
@@ -278,6 +327,13 @@ fun PasswordsScreen(
         )
     }
 
+    tagging?.let { ids ->
+        BulkTagSheet(TagTarget.LOGIN, ids) { added ->
+            tagging = null
+            if (added) selection = emptySet()
+        }
+    }
+
     trashing?.let { ids ->
         BulkTrashDialog(
             count = ids.size,
@@ -335,6 +391,8 @@ private fun PasswordsList(
                 CredentialRow(
                     item = item,
                     location = if (showLocation) folderPathLabel(state.allFolders, item.folderId, "Passwords") else null,
+                    tags = state.tags[item.id].orEmpty(),
+                    category = Categories.resolve(item.category, state.categories),
                     selected = item.id in selection,
                     selecting = selecting,
                     onOpen = { onOpenItem(item.id) },
@@ -394,6 +452,8 @@ private fun HealthEntryRow(onClick: () -> Unit, modifier: Modifier = Modifier) {
 private fun CredentialRow(
     item: CredentialListItem,
     location: String?,
+    tags: List<Tag>,
+    category: LoginCategory,
     selected: Boolean,
     selecting: Boolean,
     onOpen: () -> Unit,
@@ -406,7 +466,13 @@ private fun CredentialRow(
         onOpen = onOpen,
         onToggleSelected = onToggle,
         modifier = modifier,
-        leading = { Monogram(item.serviceName) }
+        leading = {
+            if (category.key == Categories.LOGIN.key) {
+                Monogram(item.serviceName)
+            } else {
+                CategoryBadge(category.icon, modifier = Modifier.padding(end = 14.dp), size = 36.dp)
+            }
+        }
     ) {
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -416,7 +482,10 @@ private fun CredentialRow(
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.titleMedium
             )
-            val secondary = listOfNotNull(item.username.ifEmpty { null }, location).joinToString("  ·  ")
+            val secondary = listOfNotNull(
+                item.username.ifEmpty { null } ?: category.name.takeIf { category.key != Categories.LOGIN.key },
+                location
+            ).joinToString("  ·  ")
             if (secondary.isNotEmpty()) {
                 Text(
                     text = secondary,
@@ -427,6 +496,7 @@ private fun CredentialRow(
                     style = MaterialTheme.typography.bodyMedium
                 )
             }
+            TagChipLine(tags, modifier = Modifier.padding(top = 6.dp))
         }
         if (item.isFavorite) RowStatusIcon(TazIcons.StarFilled, "Favorite")
     }

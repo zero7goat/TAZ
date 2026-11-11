@@ -4,6 +4,20 @@ import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import com.zero7goat.taz.core.fields.CustomField
+import com.zero7goat.taz.core.tags.TagTarget
+import com.zero7goat.taz.core.ui.CustomFieldsEditor
+import com.zero7goat.taz.core.ui.CustomFieldsView
+import com.zero7goat.taz.core.ui.TagPickerSheet
+import com.zero7goat.taz.core.ui.TagsSection
+import com.zero7goat.taz.features.passwords.domain.Categories
+import com.zero7goat.taz.features.passwords.domain.LoginCategory
+import com.zero7goat.taz.features.tags.TagsViewModel
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -66,6 +80,7 @@ import com.zero7goat.taz.core.security.ClipboardGuard
 import com.zero7goat.taz.core.security.SecureWindow
 import com.zero7goat.taz.core.ui.replaceAllText
 import com.zero7goat.taz.core.ui.TazIcons
+import com.zero7goat.taz.core.ui.AnimatedIcon
 import com.zero7goat.taz.features.passwords.domain.CredentialDetail
 import com.zero7goat.taz.features.passwords.domain.openableUrl
 import java.time.Instant
@@ -139,9 +154,21 @@ private fun EditorContent(
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
-    // Not rememberSaveable: the visibility flag and dialogs must never be restored from saved state.
+    val tagsViewModel: TagsViewModel = viewModel(factory = TagsViewModel.factory(context.applicationContext))
+    val categories by viewModel.categories.collectAsStateWithLifecycle()
+    val allTags by tagsViewModel.tags.collectAsStateWithLifecycle()
+    val loginId = editor.credentialId.orEmpty()
+    val itemTags by remember(loginId) { tagsViewModel.itemTags(TagTarget.LOGIN, loginId) }
+        .collectAsStateWithLifecycle(emptyList())
+    val category = Categories.resolve(draft.category, categories)
+
+    // Not rememberSaveable: visibility flags and dialogs must never be restored from saved state.
     var reveal by remember { mutableStateOf(false) }
-    var showGenerator by remember { mutableStateOf(false) }
+    var revealedFields by remember { mutableStateOf(emptySet<String>()) }
+    // What the generator fills: PASSWORD_TARGET for the main password, otherwise a field id.
+    var generatorTarget by remember { mutableStateOf<String?>(null) }
+    var pickingCategory by remember { mutableStateOf(false) }
+    var pickingTags by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     var confirmDiscard by remember { mutableStateOf(false) }
 
@@ -153,8 +180,14 @@ private fun EditorContent(
     }
 
     // The password goes back to hidden when editing starts or stops, and when the app is backgrounded.
-    LaunchedEffect(editor.isEditing) { reveal = false }
-    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { reveal = false }
+    LaunchedEffect(editor.isEditing) {
+        reveal = false
+        revealedFields = emptySet()
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+        reveal = false
+        revealedFields = emptySet()
+    }
     LaunchedEffect(editor.saveFailed) {
         if (editor.saveFailed) {
             showMessage("Couldn't save. Check the name and password.")
@@ -164,6 +197,8 @@ private fun EditorContent(
 
     fun leave() {
         focusManager.clearFocus()
+        // A new login that is left without saving keeps no tags behind.
+        if (editor.isNew) tagsViewModel.setItemTags(TagTarget.LOGIN, loginId, emptySet())
         viewModel.closeEditor()
         onClose()
     }
@@ -209,34 +244,78 @@ private fun EditorContent(
                     .padding(horizontal = 20.dp)
             ) {
                 val saved = editor.saved
-                if (editor.isEditing || saved == null) {
-                    EditBody(
-                        draft = draft,
-                        reveal = reveal,
-                        onToggleReveal = { reveal = !reveal },
-                        onGenerate = { showGenerator = true }
-                    )
-                } else {
-                    ViewBody(
-                        detail = saved,
-                        reveal = reveal,
-                        onToggleReveal = { reveal = !reveal },
-                        onCopyUsername = {
-                            ClipboardGuard.copySensitive(context, saved.username)
-                            showMessage("Username copied")
-                        },
-                        onCopyPassword = {
-                            ClipboardGuard.copySensitive(context, saved.password)
-                            showMessage("Password copied. It will be cleared from the clipboard shortly.")
-                        },
-                        onOpenWebsite = { url ->
-                            try {
-                                uriHandler.openUri(url)
-                            } catch (e: Exception) {
-                                showMessage("No app can open this address")
-                            }
+                val openUrl: (String) -> Unit = { url ->
+                    val openable = openableUrl(url)
+                    try {
+                        if (openable == null) throw IllegalArgumentException() else uriHandler.openUri(openable)
+                    } catch (e: Exception) {
+                        showMessage("No app can open this address")
+                    }
+                }
+                AnimatedContent(
+                    targetState = editor.isEditing || saved == null,
+                    transitionSpec = { fadeIn(tween(160)) togetherWith fadeOut(tween(90)) },
+                    label = "login-mode"
+                ) { editing ->
+                    Column {
+                        if (editing || saved == null) {
+                            EditBody(
+                                draft = draft,
+                                category = category,
+                                reveal = reveal,
+                                onToggleReveal = { reveal = !reveal },
+                                onGenerate = { generatorTarget = PASSWORD_TARGET },
+                                onPickCategory = { pickingCategory = true },
+                                revealedFields = revealedFields,
+                                onToggleFieldReveal = { id ->
+                                    revealedFields = if (id in revealedFields) revealedFields - id else revealedFields + id
+                                },
+                                onGenerateField = { id -> generatorTarget = id }
+                            )
+                        } else {
+                            ViewBody(
+                                detail = saved,
+                                category = Categories.resolve(saved.category, categories),
+                                reveal = reveal,
+                                onToggleReveal = { reveal = !reveal },
+                                onCopyUsername = {
+                                    ClipboardGuard.copySensitive(context, saved.username)
+                                    showMessage("Username copied")
+                                },
+                                onCopyPassword = {
+                                    ClipboardGuard.copySensitive(context, saved.password)
+                                    showMessage("Password copied. It will be cleared from the clipboard shortly.")
+                                },
+                                onOpenWebsite = openUrl,
+                                revealedFields = revealedFields,
+                                onToggleFieldReveal = { id ->
+                                    revealedFields = if (id in revealedFields) revealedFields - id else revealedFields + id
+                                },
+                                onCopyField = { field ->
+                                    ClipboardGuard.copySensitive(context, field.value)
+                                    showMessage(
+                                        if (field.isHidden) "${field.label.ifBlank { "Value" }} copied. It will be cleared shortly."
+                                        else "${field.label.ifBlank { "Value" }} copied"
+                                    )
+                                }
+                            )
                         }
-                    )
+                        TagsSection(
+                            tags = itemTags,
+                            editable = true,
+                            onEdit = { pickingTags = true },
+                            onRemove = { tag -> tagsViewModel.removeTag(TagTarget.LOGIN, loginId, tag.id) },
+                            modifier = Modifier.padding(top = 20.dp)
+                        )
+                        if (saved != null && !(editing)) {
+                            Text(
+                                text = "Created ${formatTimestamp(saved.createdAt)}\nModified ${formatTimestamp(saved.updatedAt)}",
+                                modifier = Modifier.padding(top = 24.dp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
                 }
                 Spacer(Modifier.size(32.dp))
             }
@@ -250,13 +329,42 @@ private fun EditorContent(
         )
     }
 
-    if (showGenerator) {
+    generatorTarget?.let { target ->
         PasswordGeneratorDialog(
-            onDismiss = { showGenerator = false },
+            onDismiss = { generatorTarget = null },
             onUse = { generated ->
-                draft.password.replaceAllText(generated)
-                showGenerator = false
+                if (target == PASSWORD_TARGET) {
+                    draft.password.replaceAllText(generated)
+                } else {
+                    draft.fields = draft.fields.map { if (it.id == target) it.copy(value = generated) else it }
+                }
+                generatorTarget = null
             }
+        )
+    }
+
+    if (pickingCategory) {
+        CategoryPickerSheet(
+            categories = categories,
+            selectedKey = draft.category,
+            onSelect = { chosen ->
+                draft.applyCategory(chosen)
+                pickingCategory = false
+            },
+            onDismiss = { pickingCategory = false }
+        )
+    }
+
+    if (pickingTags) {
+        TagPickerSheet(
+            allTags = allTags,
+            initiallySelected = itemTags.mapTo(HashSet()) { it.id },
+            onCreate = { tagsViewModel.createOrGet(it) },
+            onDone = { ids ->
+                tagsViewModel.setItemTags(TagTarget.LOGIN, loginId, ids)
+                pickingTags = false
+            },
+            onDismiss = { pickingTags = false }
         )
     }
 
@@ -339,55 +447,88 @@ private fun EditorTopBar(
 @Composable
 private fun BarButton(icon: ImageVector, description: String, onClick: () -> Unit) {
     IconButton(onClick = onClick) {
-        Icon(imageVector = icon, contentDescription = description)
+        AnimatedIcon(icon = icon, contentDescription = description)
     }
 }
 
 // ---------- read-only view ----------
 
+private const val PASSWORD_TARGET = "\u0000password"
+
 @Composable
 private fun ViewBody(
     detail: CredentialDetail,
+    category: LoginCategory,
     reveal: Boolean,
     onToggleReveal: () -> Unit,
     onCopyUsername: () -> Unit,
     onCopyPassword: () -> Unit,
-    onOpenWebsite: (String) -> Unit
+    onOpenWebsite: (String) -> Unit,
+    revealedFields: Set<String>,
+    onToggleFieldReveal: (String) -> Unit,
+    onCopyField: (CustomField) -> Unit
 ) {
-    Text(
-        text = detail.serviceName,
-        modifier = Modifier.padding(top = 8.dp),
-        color = MaterialTheme.colorScheme.onSurface,
-        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold)
-    )
-
-    ViewField(label = "Username", value = detail.username.ifEmpty { "Not set" }) {
-        if (detail.username.isNotEmpty()) TextButton(onClick = onCopyUsername) { Text("Copy") }
+    Row(modifier = Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        CategoryBadge(category.icon, size = 44.dp)
+        Spacer(Modifier.size(14.dp))
+        Column {
+            Text(
+                text = detail.serviceName,
+                color = MaterialTheme.colorScheme.onSurface,
+                style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold)
+            )
+            Text(
+                text = category.name,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
     }
-    ViewField(
-        label = "Password",
-        value = if (reveal) detail.password else HIDDEN_PASSWORD,
-        monospace = true
-    ) {
-        RevealButton(reveal = reveal, onToggle = onToggleReveal)
-        TextButton(onClick = onCopyPassword) { Text("Copy") }
+
+    // The login fields show for the Login category, and for any entry where they hold a value.
+    if (category.usesLoginFields || detail.username.isNotEmpty()) {
+        ViewField(label = "Username", value = detail.username.ifEmpty { "Not set" }) {
+            if (detail.username.isNotEmpty()) {
+                IconButton(onClick = onCopyUsername) {
+                    Icon(TazIcons.Copy, contentDescription = "Copy username", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+    }
+    if (category.usesLoginFields || detail.password.isNotEmpty()) {
+        ViewField(
+            label = "Password",
+            value = if (reveal) detail.password else HIDDEN_PASSWORD,
+            monospace = true
+        ) {
+            RevealButton(reveal = reveal, onToggle = onToggleReveal)
+            IconButton(onClick = onCopyPassword) {
+                Icon(TazIcons.Copy, contentDescription = "Copy password", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
     }
     if (detail.websiteUrl.isNotBlank()) {
         val openable = openableUrl(detail.websiteUrl)
         ViewField(label = "Website", value = detail.websiteUrl) {
-            if (openable != null) TextButton(onClick = { onOpenWebsite(openable) }) { Text("Open") }
+            if (openable != null) {
+                IconButton(onClick = { onOpenWebsite(openable) }) {
+                    Icon(TazIcons.OpenExternal, contentDescription = "Open website", tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
         }
+    }
+    if (detail.fields.isNotEmpty()) {
+        CustomFieldsView(
+            fields = detail.fields,
+            revealed = revealedFields,
+            onToggleReveal = onToggleFieldReveal,
+            onCopy = onCopyField,
+            onOpenUrl = onOpenWebsite
+        )
     }
     if (detail.notes.isNotBlank()) {
         ViewField(label = "Notes", value = detail.notes)
     }
-
-    Text(
-        text = "Created ${formatTimestamp(detail.createdAt)}\nModified ${formatTimestamp(detail.updatedAt)}",
-        modifier = Modifier.padding(top = 24.dp),
-        color = MaterialTheme.colorScheme.onSurfaceVariant,
-        style = MaterialTheme.typography.bodySmall
-    )
 }
 
 @Composable
@@ -398,19 +539,20 @@ private fun ViewField(
     actions: @Composable RowScope.() -> Unit = {}
 ) {
     FieldLabel(label)
-    FieldContainer {
+    FieldContainer(innerEndPadding = 2.dp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
                 text = value,
                 modifier = Modifier
                     .weight(1f)
-                    .padding(vertical = 4.dp),
+                    .padding(vertical = 4.dp, horizontal = 0.dp),
                 color = MaterialTheme.colorScheme.onSurface,
                 style = MaterialTheme.typography.bodyLarge.copy(
                     fontFamily = if (monospace) FontFamily.Monospace else FontFamily.Default
                 )
             )
             actions()
+            Spacer(Modifier.size(12.dp))
         }
     }
 }
@@ -420,11 +562,18 @@ private fun ViewField(
 @Composable
 private fun EditBody(
     draft: CredentialDraft,
+    category: LoginCategory,
     reveal: Boolean,
     onToggleReveal: () -> Unit,
-    onGenerate: () -> Unit
+    onGenerate: () -> Unit,
+    onPickCategory: () -> Unit,
+    revealedFields: Set<String>,
+    onToggleFieldReveal: (String) -> Unit,
+    onGenerateField: (String) -> Unit
 ) {
-    FieldLabel("Service or website *")
+    CategoryButton(category = category, onClick = onPickCategory, modifier = Modifier.padding(top = 8.dp))
+
+    FieldLabel(if (category.usesLoginFields) "Service or website *" else "Name *")
     FieldContainer {
         TextInput(
             state = draft.serviceName,
@@ -432,64 +581,83 @@ private fun EditBody(
         )
     }
 
-    FieldLabel("Username or email")
-    FieldContainer {
-        TextInput(
-            state = draft.username,
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.None,
-                keyboardType = KeyboardType.Email
-            )
-        )
-    }
+    // Login fields: always for Login, and kept visible on other categories while they hold a value.
+    val showUsername = category.usesLoginFields || draft.username.text.isNotEmpty()
+    val showPassword = category.usesLoginFields || draft.password.text.isNotEmpty()
+    val showWebsite = category.usesLoginFields || draft.websiteUrl.text.isNotEmpty()
 
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        FieldLabel("Password *")
-        Spacer(Modifier.weight(1f))
-        // The generator sits right next to the field it fills.
-        TextButton(onClick = onGenerate) {
-            Icon(TazIcons.Key, contentDescription = null, modifier = Modifier.size(18.dp))
-            Spacer(Modifier.size(6.dp))
-            Text("Generate")
+    if (showUsername) {
+        FieldLabel("Username or email")
+        FieldContainer {
+            TextInput(
+                state = draft.username,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.None,
+                    keyboardType = KeyboardType.Email
+                )
+            )
         }
     }
-    FieldContainer(innerEndPadding = 2.dp) {
+
+    if (showPassword) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // Toggling only changes how the text is drawn: the same TextFieldState keeps the
-            // password, the cursor position and any selection exactly as they were.
-            BasicSecureTextField(
-                state = draft.password,
-                modifier = Modifier.weight(1f),
-                textStyle = MaterialTheme.typography.bodyLarge.copy(
-                    color = MaterialTheme.colorScheme.onSurface,
-                    fontFamily = FontFamily.Monospace
-                ),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
-                textObfuscationMode = if (reveal) TextObfuscationMode.Visible else TextObfuscationMode.Hidden
-            )
-            RevealButton(reveal = reveal, onToggle = onToggleReveal)
+            FieldLabel(if (category.usesLoginFields) "Password *" else "Password")
+            Spacer(Modifier.weight(1f))
+            // The generator sits right next to the field it fills.
+            TextButton(onClick = onGenerate) {
+                Icon(TazIcons.Generate, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(6.dp))
+                Text("Generate")
+            }
+        }
+        FieldContainer(innerEndPadding = 2.dp) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Toggling only changes how the text is drawn: the same TextFieldState keeps the
+                // password, the cursor position and any selection exactly as they were.
+                BasicSecureTextField(
+                    state = draft.password,
+                    modifier = Modifier.weight(1f),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontFamily = FontFamily.Monospace
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.onSurface),
+                    textObfuscationMode = if (reveal) TextObfuscationMode.Visible else TextObfuscationMode.Hidden
+                )
+                RevealButton(reveal = reveal, onToggle = onToggleReveal)
+            }
         }
     }
 
-    FieldLabel("Website address")
-    FieldContainer {
-        TextInput(
-            state = draft.websiteUrl,
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.None,
-                keyboardType = KeyboardType.Uri
+    if (showWebsite) {
+        FieldLabel("Website address")
+        FieldContainer {
+            TextInput(
+                state = draft.websiteUrl,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.None,
+                    keyboardType = KeyboardType.Uri
+                )
             )
-        )
+        }
+        val url = draft.websiteUrl.text.toString()
+        if (url.isNotBlank() && openableUrl(url) == null) {
+            Text(
+                text = "This isn't a web address that can be opened. It will still be saved.",
+                modifier = Modifier.padding(top = 6.dp),
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
     }
-    val url = draft.websiteUrl.text.toString()
-    if (url.isNotBlank() && openableUrl(url) == null) {
-        Text(
-            text = "This isn't a web address that can be opened. It will still be saved.",
-            modifier = Modifier.padding(top = 6.dp),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            style = MaterialTheme.typography.bodySmall
-        )
-    }
+
+    CustomFieldsEditor(
+        fields = draft.fields,
+        onChange = { draft.fields = it },
+        revealed = revealedFields,
+        onToggleReveal = onToggleFieldReveal,
+        onGenerate = onGenerateField
+    )
 
     FieldLabel("Notes")
     FieldContainer {

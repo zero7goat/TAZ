@@ -14,6 +14,8 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -66,6 +68,10 @@ import com.zero7goat.taz.core.ui.SelectableRow
 import com.zero7goat.taz.core.ui.SelectionAction
 import com.zero7goat.taz.core.ui.TazFab
 import com.zero7goat.taz.core.ui.TazIcons
+import com.zero7goat.taz.features.tags.BulkTagSheet
+import com.zero7goat.taz.core.tags.TagTarget
+import com.zero7goat.taz.core.ui.TagChipLine
+import com.zero7goat.taz.core.tags.Tag
 import com.zero7goat.taz.core.ui.folderPathLabel
 import com.zero7goat.taz.core.ui.keepVisible
 import com.zero7goat.taz.core.ui.rememberSelection
@@ -106,6 +112,7 @@ fun FilesScreen(
     var selection by rememberSelection()
     var moving by remember { mutableStateOf<Set<String>?>(null) }
     var trashing by remember { mutableStateOf<Set<String>?>(null) }
+    var tagging by remember { mutableStateOf<Set<String>?>(null) }
     var fileToEdit by remember { mutableStateOf<FileEntity?>(null) }
     var creatingFolder by remember { mutableStateOf(false) }
     var folderToRename by remember { mutableStateOf<FolderEntity?>(null) }
@@ -141,6 +148,7 @@ fun FilesScreen(
                 SelectionAction("Add to favorites") { viewModel.setFavorite(selectedFiles, true) }
             }
         )
+        add(SelectionAction("Add tags") { tagging = selection })
         if (single != null) {
             add(SelectionAction("Edit details") { fileToEdit = single })
             add(
@@ -350,6 +358,13 @@ fun FilesScreen(
         )
     }
 
+    tagging?.let { ids ->
+        BulkTagSheet(TagTarget.FILE, ids) { added ->
+            tagging = null
+            if (added) selection = emptySet()
+        }
+    }
+
     trashing?.let { ids ->
         BulkTrashDialog(
             count = ids.size,
@@ -402,6 +417,7 @@ private fun FilesList(
                 FileRow(
                     file = file,
                     location = if (showLocation) folderPathLabel(state.allFolders, file.folderId, "Files") else null,
+                    tags = state.tags[file.id].orEmpty(),
                     selected = file.id in selection,
                     selecting = selecting,
                     onOpen = { onOpenFile(file.id) },
@@ -417,6 +433,7 @@ private fun FilesList(
 private fun FileRow(
     file: FileEntity,
     location: String?,
+    tags: List<Tag>,
     selected: Boolean,
     selecting: Boolean,
     onOpen: () -> Unit,
@@ -431,14 +448,21 @@ private fun FileRow(
         onToggleSelected = onToggle,
         modifier = modifier,
         leading = {
-            Icon(
-                imageVector = TazIcons.File,
-                contentDescription = null,
+            // The same round badge as login rows, with an icon for the kind of file.
+            Box(
                 modifier = Modifier
                     .padding(end = 14.dp)
-                    .size(22.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+                    .size(36.dp)
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh, CircleShape),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = fileIconFor(file.mimeType, file.displayName),
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
         }
     ) {
         Column(modifier = Modifier.weight(1f)) {
@@ -458,6 +482,7 @@ private fun FileRow(
                 overflow = TextOverflow.Ellipsis,
                 style = MaterialTheme.typography.bodyMedium
             )
+            TagChipLine(tags, modifier = Modifier.padding(top = 6.dp))
         }
         if (file.isFavorite) RowStatusIcon(TazIcons.StarFilled, "Favorite")
     }

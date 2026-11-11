@@ -28,6 +28,18 @@ No account. No cloud. No tracking. Everything stays on your phone.
 
 ## Features
 
+### 🔍 Search everything
+- One search across **notes, logins, files and folders**, from the search button on every list
+- Every word you type must match (any order, upper/lower case ignored); results are grouped by type, with the match **highlighted** and a snippet showing where it was found
+- Filters: type, favourites, tags, folder (including subfolders) and date modified
+- Searches note text, usernames, websites, login notes, custom field names, file names, descriptions, keywords and tags. **Passwords and hidden field values are never searched or shown**
+
+### 🏷️ Tags
+- Tag notes, logins and files, several tags per item; tags show as compact chips in lists and details
+- Pick tags from a searchable list or create one on the spot; "Work", "work" and " WORK " are always the same tag
+- Add tags to many items at once from multi-select
+- Rename and delete tags in **Settings → Tags** (deleting a tag never deletes items)
+
 ### 📝 Notes
 - Rich notes with **Markdown-style formatting**, a formatting toolbar and a read-only preview mode
 - Insert **images** into notes (JPEG, PNG, WebP, GIF, up to 25 MB each)
@@ -36,9 +48,13 @@ No account. No cloud. No tracking. Everything stays on your phone.
 - Organise with **nested folders**
 - **Search inside note text**: every word you type must appear somewhere in the title, description or text (any order). Results show a snippet around the match with your words in bold
 - Deleting a folder never deletes what's inside it; items move to the top level
+- **Custom fields** on notes (text, number, date, link, email, phone, hidden secret, yes/no), stored encrypted
 
 ### 🔑 Passwords
 - Store logins with service name, website, username, password and notes
+- **Categories**: Login, Wi-Fi, Bank account, Payment card, Identity document, Software license, Secure note and Other, each with suggested fields, plus **your own categories** (Settings → Login categories)
+- **Custom fields** of nine types: add, rename, reorder, change type (only when the value fits), hide, show with the eye icon, and copy each one. Sensitive fields are hidden by default, and the password generator works on any secret field
+- Custom fields are encrypted with the same Keystore key as passwords and included in encrypted backups
 - Username, password and notes are **encrypted with AES-256-GCM**, with the key held in the **Android Keystore** and never leaving the device
 - Show or hide a password with the **eye icon** inside the field
 - Unsaved login forms survive switching apps and auto-lock (kept encrypted, never as plain text)
@@ -51,7 +67,10 @@ No account. No cloud. No tracking. Everything stays on your phone.
 - Import any file into TAZ's private storage
 - Rename files, add **descriptions and keywords**, favourite them and sort them into folders
 - Automatic categories: images, videos, audio, documents, archives
-- **Built-in preview** for images, PDFs and text/code files; other files open in your preferred app
+- **Built-in viewer** for images, PDFs and text/code files; other files open in your preferred app
+  - Images: pinch or double-tap to zoom, pan, fit or actual size, swipe through the images of the folder
+  - PDFs: page counter, previous/next, go to page, zoom, fit to width or whole page
+  - Text and code: monospace font, line numbers, indentation kept, wrap or scroll sideways
 - Share or open files without leaving the vault workflow
 
 ### 🔒 Security & privacy
@@ -80,6 +99,7 @@ No account. No cloud. No tracking. Everything stays on your phone.
 - **Encrypted backup** to a single `.tazbackup` file, protected by a passphrase you choose
   (AES-256-GCM, key from PBKDF2-HMAC-SHA256, chunked & authenticated so tampering or truncation is detected)
 - Backups are **portable**: restore after a reinstall or on a new phone
+- Backups include tags, categories and custom fields; backups made with TAZ 1.0 and 1.1 still restore
 - Restore safely: a damaged, incomplete or wrong-passphrase backup never changes your current data
 - **Export to spreadsheet (`.xlsx`)**: a readable index of your notes, files and login names/sites.
   Passwords, usernames and file contents are deliberately **never** included

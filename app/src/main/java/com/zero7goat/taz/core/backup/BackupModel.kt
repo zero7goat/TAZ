@@ -1,5 +1,7 @@
 package com.zero7goat.taz.core.backup
 
+import com.zero7goat.taz.core.fields.CustomField
+
 /*
  * What a backup contains, independent of Room. Pure Kotlin so the format can be unit tested.
  * Login records hold decrypted values: they only ever exist in memory and inside the encrypted
@@ -24,7 +26,9 @@ data class NoteRecord(
     val updatedAt: Long,
     val isFavorite: Boolean,
     val isPinned: Boolean,
-    val colorIndex: Int
+    val colorIndex: Int,
+    /** Decrypted custom fields (format version 2). Only ever in memory and in the encrypted stream. */
+    val fields: List<CustomField> = emptyList()
 )
 
 class CredentialRecord(
@@ -37,7 +41,9 @@ class CredentialRecord(
     val notes: String,
     val isFavorite: Boolean,
     val createdAt: Long,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val category: String = "login",
+    val fields: List<CustomField> = emptyList()
 ) {
     override fun toString(): String = "CredentialRecord(id=$id, secrets=hidden)"
 }
@@ -67,5 +73,17 @@ data class BackupContents(
     val notes: List<NoteRecord>,
     val credentials: List<CredentialRecord>,
     val files: List<FileRecord>,
-    val settings: Map<String, String>
+    val settings: Map<String, String>,
+    val tags: List<TagRecord> = emptyList(),
+    val tagLinks: List<TagLinkRecord> = emptyList(),
+    val categories: List<CategoryRecord> = emptyList()
 )
+
+/** A tag (format version 2). */
+data class TagRecord(val id: String, val name: String, val createdAt: Long)
+
+/** A tag on a note ("NOTE"), login ("LOGIN") or file ("FILE"). */
+data class TagLinkRecord(val tagId: String, val itemType: String, val itemId: String)
+
+/** A custom login category: name, icon and its field template (labels and types, no values). */
+data class CategoryRecord(val id: String, val name: String, val icon: String, val fieldsJson: String, val createdAt: Long)

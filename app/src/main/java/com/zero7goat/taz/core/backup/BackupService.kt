@@ -6,6 +6,14 @@ import android.provider.DocumentsContract
 import androidx.room.withTransaction
 import com.zero7goat.taz.core.AppContainer
 import com.zero7goat.taz.core.database.FolderEntity
+import com.zero7goat.taz.core.fields.CustomField
+import com.zero7goat.taz.core.tags.ItemTagEntity
+import com.zero7goat.taz.core.tags.TagEntity
+import com.zero7goat.taz.core.tags.TagNames
+import com.zero7goat.taz.features.notes.data.NoteFieldsEntity
+import com.zero7goat.taz.features.notes.data.NoteRepository
+import com.zero7goat.taz.features.passwords.data.CategoryEntity
+import com.zero7goat.taz.features.passwords.data.CredentialEntity
 import com.zero7goat.taz.core.database.TazDatabase
 import com.zero7goat.taz.core.security.FieldCipher
 import com.zero7goat.taz.core.security.FieldCipherException
@@ -66,6 +74,7 @@ class BackupService(
     private val noteImages = NoteImageStore(filesDir)
     private val committer = RestoreCommitter(filesDir)
     private val credentials = CredentialRepository(database.credentialDao(), cipher)
+    private val notes = NoteRepository(database.noteDao(), cipher = cipher)
 
     // ---------- backup ----------
 
@@ -96,14 +105,20 @@ class BackupService(
                 Snapshot(
                     folders = database.folderDao().getAll(),
                     notes = database.noteDao().getAllActive(),
-                    files = database.fileDao().getAllActive()
+                    files = database.fileDao().getAllActive(),
+                    tags = database.tagDao().getAll(),
+                    tagLinks = database.tagDao().getAllLinks(),
+                    categories = database.categoryDao().getAll()
                 )
             }
             val scope = currentCoroutineContext()
             try {
-                val (logins, unreadable) = credentials.decryptAllForBackup()
+                val (logins, unreadableLogins) = credentials.decryptAllForBackup()
+                val (noteFields, unreadableFields) = notes.loadAllFields()
+                // Note fields that cannot be decrypted count like unreadable logins: never silently dropped.
+                val unreadable = unreadableLogins + unreadableFields
                 if (unreadable > 0 && !allowUnreadableLogins) throw BackupException(BackupError.UNREADABLE_LOGINS)
-                val contents = toContents(snapshot, logins, currentSettings())
+                val contents = toContents(snapshot, logins, noteFields, currentSettings())
                 val header = BackupHeader.create(kdfIterations)
                 val key = BackupKeys.derive(passphrase, header)
                 onPhase(BackupPhase.ENCRYPTING)
@@ -137,9 +152,21 @@ class BackupService(
             }
         }
 
-    private class Snapshot(val folders: List<FolderEntity>, val notes: List<NoteEntity>, val files: List<FileEntity>)
+    private class Snapshot(
+        val folders: List<FolderEntity>,
+        val notes: List<NoteEntity>,
+        val files: List<FileEntity>,
+        val tags: List<TagEntity>,
+        val tagLinks: List<ItemTagEntity>,
+        val categories: List<CategoryEntity>
+    )
 
-    private fun toContents(snapshot: Snapshot, logins: List<CredentialDetail>, prefs: Map<String, String>): BackupContents {
+    private fun toContents(
+        snapshot: Snapshot,
+        logins: List<CredentialDetail>,
+        noteFields: Map<String, List<CustomField>>,
+        prefs: Map<String, String>
+    ): BackupContents {
         val moduleOf = snapshot.folders.associate { it.id to it.module }
         // A reference to a folder of another module (never created by the app) is dropped, so the
         // backup always passes the restore checks.
@@ -153,7 +180,7 @@ class BackupService(
                     id = it.id, folderId = folderIn(it.folderId, "NOTES"), title = it.title,
                     description = it.description, body = it.body, createdAt = it.createdAt,
                     updatedAt = it.updatedAt, isFavorite = it.isFavorite, isPinned = it.isPinned,
-                    colorIndex = it.colorIndex
+                    colorIndex = it.colorIndex, fields = noteFields[it.id].orEmpty()
                 )
             },
             credentials = logins.map {
@@ -161,9 +188,21 @@ class BackupService(
                     id = it.id, folderId = folderIn(it.folderId, "PASSWORDS"), serviceName = it.serviceName,
                     websiteUrl = it.websiteUrl, username = it.username, password = it.password,
                     notes = it.notes, isFavorite = it.isFavorite, createdAt = it.createdAt,
-                    updatedAt = it.updatedAt
+                    updatedAt = it.updatedAt, category = it.category, fields = it.fields
                 )
             },
+            tags = snapshot.tags.map { TagRecord(it.id, it.name, it.createdAt) },
+            // Links of items in the trash are left out with the items (the reader drops them anyway).
+            tagLinks = run {
+                val active = mapOf(
+                    "NOTE" to snapshot.notes.mapTo(HashSet()) { it.id },
+                    "LOGIN" to logins.mapTo(HashSet()) { it.id },
+                    "FILE" to snapshot.files.mapTo(HashSet()) { it.id }
+                )
+                snapshot.tagLinks.filter { active[it.itemType]?.contains(it.itemId) == true }
+                    .map { TagLinkRecord(it.tagId, it.itemType, it.itemId) }
+            },
+            categories = snapshot.categories.map { CategoryRecord(it.id, it.name, it.icon, it.fieldsJson, it.createdAt) },
             files = snapshot.files.map {
                 FileRecord(
                     id = it.id, folderId = folderIn(it.folderId, "FILES"), originalName = it.originalName,
@@ -244,8 +283,11 @@ class BackupService(
 
             onPhase(BackupPhase.APPLYING)
             val contents = staged.contents
-            val entities = try {
-                contents.credentials.map { credentials.encryptForRestore(it.toDetail()) }
+            val entities: List<CredentialEntity>
+            val noteFieldEntities: List<NoteFieldsEntity>
+            try {
+                entities = contents.credentials.map { credentials.encryptForRestore(it.toDetail()) }
+                noteFieldEntities = contents.notes.mapNotNull { notes.encryptFieldsForRestore(it.id, it.fields) }
             } catch (e: FieldCipherException) {
                 throw BackupException(BackupError.FAILED)
             }
@@ -258,7 +300,10 @@ class BackupService(
             withContext(NonCancellable) {
                 committer.commit(listOf(staged.stagedFiles, staged.stagedImages), fingerprint) {
                     database.withTransaction {
-                        database.noteDao().deleteAll()
+                        database.tagDao().deleteAllLinks()
+                        database.tagDao().deleteAll()
+                        database.categoryDao().deleteAll()
+                        database.noteDao().deleteAll() // note fields go with their notes (cascade)
                         database.credentialDao().deleteAll()
                         database.fileDao().deleteAll()
                         database.folderDao().deleteAll()
@@ -266,8 +311,16 @@ class BackupService(
                             FolderEntity(it.id, it.module, it.name, it.parentId, it.createdAt)
                         })
                         database.noteDao().insertAll(contents.notes.map { it.toEntity() })
+                        database.noteDao().insertAllFields(noteFieldEntities)
                         database.credentialDao().insertAll(entities)
                         database.fileDao().insertAll(contents.files.map { it.toEntity(vault) })
+                        database.categoryDao().insertAll(contents.categories.map {
+                            CategoryEntity(it.id, it.name, it.icon, it.fieldsJson, it.createdAt)
+                        })
+                        database.tagDao().insertAll(contents.tags.map {
+                            TagEntity(it.id, TagNames.clean(it.name), TagNames.normalize(it.name), it.createdAt)
+                        })
+                        database.tagDao().insertAllLinks(contents.tagLinks.map { ItemTagEntity(it.tagId, it.itemType, it.itemId) })
                     }
                 }
                 committed = true
@@ -361,7 +414,8 @@ class BackupService(
 
 private fun CredentialRecord.toDetail() = CredentialDetail(
     id = id, folderId = folderId, serviceName = serviceName, username = username, password = password,
-    websiteUrl = websiteUrl, notes = notes, isFavorite = isFavorite, createdAt = createdAt, updatedAt = updatedAt
+    websiteUrl = websiteUrl, notes = notes, isFavorite = isFavorite, createdAt = createdAt, updatedAt = updatedAt,
+    category = category, fields = fields
 )
 
 private fun NoteRecord.toEntity() = NoteEntity(

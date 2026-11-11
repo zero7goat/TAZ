@@ -7,6 +7,17 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.animateColorAsState
 import androidx.activity.compose.BackHandler
+import androidx.compose.runtime.DisposableEffect
+import com.zero7goat.taz.core.fields.CustomFields
+import com.zero7goat.taz.core.security.ClipboardGuard
+import com.zero7goat.taz.core.security.SecureWindow
+import com.zero7goat.taz.core.tags.TagTarget
+import com.zero7goat.taz.core.ui.CustomFieldsEditor
+import com.zero7goat.taz.core.ui.CustomFieldsView
+import com.zero7goat.taz.core.ui.TagPickerSheet
+import com.zero7goat.taz.core.ui.TagsSection
+import com.zero7goat.taz.core.ui.findFragmentActivity
+import com.zero7goat.taz.features.tags.TagsViewModel
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -72,6 +83,7 @@ import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zero7goat.taz.core.ui.TazIcons
+import com.zero7goat.taz.core.ui.AnimatedIcon
 import com.zero7goat.taz.core.ui.replaceAllText
 import com.zero7goat.taz.features.notes.data.NoteImageStore
 import kotlinx.coroutines.launch
@@ -150,8 +162,24 @@ private fun EditorContent(editor: EditorUiState, viewModel: NotesViewModel, onCl
         viewModel.onBodyChange(bodyState.text.toString())
     }
 
+    val context = LocalContext.current
+    val tagsViewModel: TagsViewModel = viewModel(factory = TagsViewModel.factory(context.applicationContext))
+    val noteId = editor.noteId.orEmpty()
+    val allTags by tagsViewModel.tags.collectAsStateWithLifecycle()
+    val noteTags by remember(noteId) { tagsViewModel.itemTags(TagTarget.NOTE, noteId) }.collectAsStateWithLifecycle(emptyList())
+    var pickingTags by remember { mutableStateOf(false) }
+    // Hidden field values are shown only while revealed, and never restored from saved state.
+    var revealedFields by remember { mutableStateOf(emptySet<String>()) }
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { revealedFields = emptySet() }
+    // A note holding hidden values is kept out of screenshots and the recent-apps preview.
+    if (editor.fields.any { it.isHidden && it.value.isNotEmpty() }) SecureWindowWhileShown()
+
     fun finish() {
         pushText()
+        // A new note that is left empty is never saved, so it keeps no tags either.
+        val emptyNew = editor.isNewNote && titleState.text.isBlank() && descriptionState.text.isBlank() &&
+            bodyState.text.isBlank() && editor.fields.none { it.value.isNotEmpty() && it.value != CustomFields.FALSE }
+        if (emptyNew) tagsViewModel.setItemTags(TagTarget.NOTE, noteId, emptySet())
         viewModel.closeEditor()
         onClose()
     }
@@ -198,6 +226,23 @@ private fun EditorContent(editor: EditorUiState, viewModel: NotesViewModel, onCl
                     body = bodyState.text.toString(),
                     onBodyChange = { bodyState.replaceAllText(it) }
                 )
+                if (editor.fields.isNotEmpty()) {
+                    HorizontalDivider(modifier = Modifier.padding(top = 20.dp), color = MaterialTheme.colorScheme.outlineVariant)
+                    CustomFieldsView(
+                        fields = editor.fields,
+                        revealed = revealedFields,
+                        onToggleReveal = { id -> revealedFields = if (id in revealedFields) revealedFields - id else revealedFields + id },
+                        onCopy = { field -> ClipboardGuard.copySensitive(context, field.value) }
+                    )
+                }
+                if (!editor.fieldsReadable) UnreadableFieldsNotice()
+                TagsSection(
+                    tags = noteTags,
+                    editable = true,
+                    onEdit = { pickingTags = true },
+                    onRemove = { tagsViewModel.removeTag(TagTarget.NOTE, noteId, it.id) },
+                    modifier = Modifier.padding(top = 20.dp)
+                )
             } else {
                 PlainField(
                     state = titleState,
@@ -219,6 +264,24 @@ private fun EditorContent(editor: EditorUiState, viewModel: NotesViewModel, onCl
                     modifier = Modifier.onFocusChanged { if (it.hasFocus) bodyActive = false }
                 )
                 ColorRow(selected = editor.colorIndex, onSelect = viewModel::onColorChange)
+                TagsSection(
+                    tags = noteTags,
+                    editable = true,
+                    onEdit = { pickingTags = true },
+                    onRemove = { tagsViewModel.removeTag(TagTarget.NOTE, noteId, it.id) },
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                if (editor.fieldsReadable) {
+                    CustomFieldsEditor(
+                        fields = editor.fields,
+                        onChange = viewModel::onFieldsChange,
+                        revealed = revealedFields,
+                        onToggleReveal = { id -> revealedFields = if (id in revealedFields) revealedFields - id else revealedFields + id },
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                } else {
+                    UnreadableFieldsNotice()
+                }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                 Spacer(Modifier.size(16.dp))
                 PlainField(
@@ -243,6 +306,19 @@ private fun EditorContent(editor: EditorUiState, viewModel: NotesViewModel, onCl
                 }
             )
         }
+    }
+
+    if (pickingTags) {
+        TagPickerSheet(
+            allTags = allTags,
+            initiallySelected = noteTags.mapTo(HashSet()) { it.id },
+            onCreate = { tagsViewModel.createOrGet(it) },
+            onDone = { ids ->
+                tagsViewModel.setItemTags(TagTarget.NOTE, noteId, ids)
+                pickingTags = false
+            },
+            onDismiss = { pickingTags = false }
+        )
     }
 
     imageError?.let { message ->
@@ -336,7 +412,7 @@ private fun EditorTopBar(
 @Composable
 private fun BarButton(icon: ImageVector, description: String, onClick: () -> Unit) {
     IconButton(onClick = onClick) {
-        Icon(imageVector = icon, contentDescription = description)
+        AnimatedIcon(icon = icon, contentDescription = description)
     }
 }
 
@@ -396,6 +472,27 @@ private fun FormatIconButton(
  * the selection is obvious without relying on colour alone. "None" is drawn as an empty circle
  * with a slash.
  */
+@Composable
+private fun UnreadableFieldsNotice() {
+    Text(
+        text = "This note's custom fields can't be decrypted on this device. They are kept unchanged.",
+        modifier = Modifier.padding(vertical = 8.dp),
+        color = MaterialTheme.colorScheme.error,
+        style = MaterialTheme.typography.bodySmall
+    )
+}
+
+/** Marks the window secure while shown (no screenshots, blank recent-apps preview). */
+@Composable
+private fun SecureWindowWhileShown() {
+    val activity = LocalContext.current.findFragmentActivity()
+    DisposableEffect(activity) {
+        val window = activity?.window
+        if (window != null) SecureWindow.acquire(window)
+        onDispose { if (window != null) SecureWindow.release(window) }
+    }
+}
+
 @Composable
 private fun ColorRow(selected: Int, onSelect: (Int) -> Unit) {
     Column(modifier = Modifier.padding(top = 12.dp, bottom = 10.dp)) {

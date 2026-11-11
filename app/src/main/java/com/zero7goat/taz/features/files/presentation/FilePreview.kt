@@ -24,7 +24,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
+import androidx.compose.ui.draw.clip
+import com.zero7goat.taz.core.ui.AppFonts
+import com.zero7goat.taz.core.ui.TazIcons
 import androidx.compose.ui.unit.dp
 import com.zero7goat.taz.features.files.data.FileEntity
 import com.zero7goat.taz.features.files.domain.PreviewKind
@@ -102,16 +109,41 @@ private suspend fun loadPreview(blob: File?, kind: PreviewKind): PreviewState {
     }
 }
 
+/** A decoded image and the size of the original file in pixels (after EXIF rotation). */
+class DecodedImage(val bitmap: ImageBitmap, val originalWidth: Int, val originalHeight: Int)
+
+/**
+ * Decodes an image for the full-screen viewer: downsampled so its longer side is at most
+ * [maxDimension] pixels, plus the original pixel size (used for "actual size"). Null if it cannot
+ * be decoded. Runs on the calling thread; call it off the main thread.
+ */
+fun decodeImageForViewer(file: File, maxDimension: Int = MAX_IMAGE_DIMENSION): DecodedImage? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    try {
+        BitmapFactory.decodeFile(file.path, bounds)
+    } catch (e: Exception) {
+        return null
+    }
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    val bitmap = decodeImage(file, maxDimension) ?: return null
+    val rotated = exifRotation(file) % 180 != 0
+    return DecodedImage(
+        bitmap = bitmap.asImageBitmap(),
+        originalWidth = if (rotated) bounds.outHeight else bounds.outWidth,
+        originalHeight = if (rotated) bounds.outWidth else bounds.outHeight
+    )
+}
+
 /** Decodes a downsampled copy so large photos cannot exhaust memory. Returns null if it cannot be decoded. */
-private fun decodeImage(file: File): Bitmap? {
+private fun decodeImage(file: File, maxDimension: Int = MAX_IMAGE_DIMENSION): Bitmap? {
     return try {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(file.path, bounds)
         if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
 
         var sample = 1
-        while (bounds.outWidth / (sample * 2) >= MAX_IMAGE_DIMENSION ||
-            bounds.outHeight / (sample * 2) >= MAX_IMAGE_DIMENSION
+        while (bounds.outWidth / (sample * 2) >= maxDimension ||
+            bounds.outHeight / (sample * 2) >= maxDimension
         ) {
             sample *= 2
         }
@@ -179,6 +211,27 @@ class PdfPreviewDocument private constructor(
 
     private val lock = Any()
     private var closed = false
+    private val aspects = HashMap<Int, Float>()
+
+    /** Height divided by width of page [index] (1.414 for A4 portrait); 1.414 if it cannot be read. */
+    suspend fun pageAspect(index: Int): Float = withContext(Dispatchers.IO) {
+        synchronized(lock) {
+            aspects[index]?.let { return@synchronized it }
+            if (closed || index !in 0 until pageCount) return@synchronized DEFAULT_ASPECT
+            val aspect = try {
+                val page = renderer.openPage(index)
+                try {
+                    if (page.width > 0) page.height.toFloat() / page.width else DEFAULT_ASPECT
+                } finally {
+                    page.close()
+                }
+            } catch (e: Exception) {
+                DEFAULT_ASPECT
+            }
+            aspects[index] = aspect
+            aspect
+        }
+    }
 
     suspend fun renderPage(index: Int, targetWidthPx: Int): Bitmap? = withContext(Dispatchers.IO) {
         synchronized(lock) {
@@ -221,6 +274,8 @@ class PdfPreviewDocument private constructor(
     }
 
     companion object {
+        private const val DEFAULT_ASPECT = 1.414f
+
         /** Returns null if the file is not a readable PDF (corrupt, or password protected). */
         fun open(file: File): PdfPreviewDocument? {
             var descriptor: ParcelFileDescriptor? = null
@@ -239,8 +294,14 @@ class PdfPreviewDocument private constructor(
     }
 }
 
-/** Adds the preview as items of a LazyColumn (so a long PDF or text never needs nested scrolling). */
-fun LazyListScope.previewItems(preview: PreviewState, fileName: String, pageWidthPx: Int) {
+/** Lines of a text file shown inline on the detail screen; the viewer shows the rest. */
+private const val INLINE_TEXT_LINES = 40
+
+/**
+ * Adds the inline preview as items of a LazyColumn: the image, the first page of a PDF, or the first
+ * lines of a text file, each with a way into the full-screen viewer ([onOpenViewer]).
+ */
+fun LazyListScope.previewItems(preview: PreviewState, fileName: String, pageWidthPx: Int, onOpenViewer: () -> Unit) {
     when (preview) {
         PreviewState.Loading -> item(key = "preview-loading") {
             Box(Modifier.fillMaxWidth().height(160.dp), contentAlignment = Alignment.Center) {
@@ -257,35 +318,72 @@ fun LazyListScope.previewItems(preview: PreviewState, fileName: String, pageWidt
         }
 
         PreviewState.Failed -> item(key = "preview-failed") {
-            PreviewNotice("This file couldn't be previewed. It may be damaged or protected. Try Open.")
+            PreviewNotice("This file couldn't be previewed. It may be damaged, protected or too large. Try Open.")
         }
 
-        is PreviewState.Image -> item(key = "preview-image") {
-            Image(
-                bitmap = preview.bitmap,
-                contentDescription = fileName,
-                modifier = Modifier.fillMaxWidth(),
-                contentScale = ContentScale.Fit
-            )
+        is PreviewState.Image -> {
+            item(key = "preview-image") {
+                Image(
+                    bitmap = preview.bitmap,
+                    contentDescription = fileName,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable(onClickLabel = "View full screen", onClick = onOpenViewer),
+                    contentScale = ContentScale.Fit
+                )
+            }
+            item(key = "preview-open") {
+                ViewerHint(TazIcons.ZoomIn, "View full screen and zoom", onOpenViewer, Modifier.padding(top = 12.dp))
+            }
         }
 
         is PreviewState.TextContent -> {
-            items(preview.lines.size, key = { "line-$it" }) { index ->
-                Text(
-                    text = preview.lines[index].ifEmpty { " " },
-                    color = MaterialTheme.colorScheme.onSurface,
-                    style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
-                )
-            }
-            if (preview.isTruncated) {
-                item(key = "preview-truncated") {
-                    PreviewNotice("Only the beginning of this file is shown.")
+            item(key = "preview-text") {
+                Surface(
+                    onClick = onOpenViewer,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainer
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        preview.lines.take(INLINE_TEXT_LINES).forEach { line ->
+                            Text(
+                                text = line.ifEmpty { " " },
+                                color = MaterialTheme.colorScheme.onSurface,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                style = MaterialTheme.typography.bodySmall.copy(fontFamily = AppFonts.monospace)
+                            )
+                        }
+                    }
                 }
+            }
+            item(key = "preview-open") {
+                ViewerHint(
+                    TazIcons.TextLines,
+                    if (preview.lines.size > INLINE_TEXT_LINES || preview.isTruncated) "View the whole file" else "Open in text viewer",
+                    onOpenViewer,
+                    Modifier.padding(top = 12.dp)
+                )
             }
         }
 
-        is PreviewState.Pdf -> items(preview.document.pageCount, key = { "page-$it" }) { index ->
-            PdfPage(preview.document, index, pageWidthPx)
+        is PreviewState.Pdf -> {
+            item(key = "page-0") {
+                Box(modifier = Modifier.clip(RoundedCornerShape(12.dp)).clickable(onClickLabel = "Open PDF viewer", onClick = onOpenViewer)) {
+                    PdfPage(preview.document, 0, pageWidthPx)
+                }
+            }
+            item(key = "preview-open") {
+                val pages = preview.document.pageCount
+                ViewerHint(
+                    TazIcons.Page,
+                    if (pages == 1) "Open PDF viewer · 1 page" else "Open PDF viewer · $pages pages",
+                    onOpenViewer,
+                    Modifier.padding(top = 4.dp)
+                )
+            }
         }
     }
 }

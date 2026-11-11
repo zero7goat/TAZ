@@ -9,6 +9,10 @@ import com.zero7goat.taz.core.database.FolderEntity
 import com.zero7goat.taz.core.database.FolderModule
 import com.zero7goat.taz.core.database.FolderRepository
 import com.zero7goat.taz.core.database.TazDatabase
+import com.zero7goat.taz.core.tags.Tag
+import com.zero7goat.taz.core.tags.TagRepository
+import com.zero7goat.taz.core.tags.TagTarget
+import kotlinx.coroutines.flow.flowOf
 import com.zero7goat.taz.core.storage.VaultFileStore
 import com.zero7goat.taz.features.files.data.ExternalFile
 import com.zero7goat.taz.features.files.data.FileEntity
@@ -47,14 +51,17 @@ data class FilesUiState(
     val path: List<FolderEntity> = emptyList(),
     val isBrowsing: Boolean = true,
     val isLoading: Boolean = true,
-    val query: FilesQuery = FilesQuery()
+    val query: FilesQuery = FilesQuery(),
+    /** Tags of each file, by id. */
+    val tags: Map<String, List<Tag>> = emptyMap()
 )
 
 data class ImportProgress(val current: Int, val total: Int)
 
 class FilesViewModel(
     private val repository: FileRepository,
-    private val folderRepository: FolderRepository
+    private val folderRepository: FolderRepository,
+    tagRepository: TagRepository? = null
 ) : ViewModel() {
 
     private val query = MutableStateFlow(FilesQuery())
@@ -62,8 +69,9 @@ class FilesViewModel(
     val uiState: StateFlow<FilesUiState> = combine(
         repository.observeFiles(),
         folderRepository.observeFolders(FolderModule.FILES),
-        query
-    ) { files, folders, currentQuery ->
+        query,
+        tagRepository?.observeTagsByItem(TagTarget.FILE) ?: flowOf(emptyMap())
+    ) { files, folders, currentQuery, tags ->
         val selection = selectFiles(files, folders, currentQuery, System.currentTimeMillis())
         FilesUiState(
             files = selection.files,
@@ -73,7 +81,8 @@ class FilesViewModel(
             path = selection.path,
             isBrowsing = selection.isBrowsing,
             isLoading = false,
-            query = currentQuery
+            query = currentQuery,
+            tags = tags
         )
     }.flowOn(Dispatchers.Default)
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), FilesUiState())
@@ -196,6 +205,9 @@ class FilesViewModel(
 
     fun observeFile(id: String): Flow<FileEntity?> = repository.observeFile(id)
 
+    /** Every file outside the trash (the image viewer swipes through those in the same folder). */
+    fun observeAllFiles(): Flow<List<FileEntity>> = repository.observeFiles()
+
     /** The stored copy if it exists and its recorded path is safe, otherwise null. */
     fun resolveBlob(file: FileEntity): File? = repository.resolveBlob(file)
 
@@ -255,7 +267,7 @@ class FilesViewModel(
                         store = VaultFileStore(appContext.filesDir),
                         appContext = appContext
                     )
-                    return FilesViewModel(repository, FolderRepository(database.folderDao())) as T
+                    return FilesViewModel(repository, FolderRepository(database.folderDao()), TagRepository(database.tagDao())) as T
                 }
             }
         }

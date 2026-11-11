@@ -1,6 +1,8 @@
 package com.zero7goat.taz.features.passwords.domain
 
-/** What a list row shows. Never contains the password or notes. */
+import com.zero7goat.taz.core.fields.CustomField
+
+/** What a list row shows. Never contains the password, notes or custom fields. */
 data class CredentialListItem(
     val id: String,
     val folderId: String?,
@@ -8,7 +10,8 @@ data class CredentialListItem(
     val websiteUrl: String,
     val domain: String,
     val username: String,
-    val isFavorite: Boolean
+    val isFavorite: Boolean,
+    val category: String = Categories.LOGIN.key
 )
 
 /** A fully decrypted login. [toString] hides secrets so accidental logging cannot leak them. */
@@ -22,7 +25,9 @@ data class CredentialDetail(
     val notes: String,
     val isFavorite: Boolean,
     val createdAt: Long,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val category: String = Categories.LOGIN.key,
+    val fields: List<CustomField> = emptyList()
 ) {
     override fun toString(): String = "CredentialDetail(id=$id, secrets=hidden)"
 }
@@ -37,7 +42,13 @@ data class CredentialInput(
     val websiteUrl: String,
     val notes: String,
     val isFavorite: Boolean,
-    val createdAt: Long
+    val createdAt: Long,
+    val category: String = Categories.LOGIN.key,
+    val fields: List<CustomField> = emptyList()
 ) {
     override fun toString(): String = "CredentialInput(id=$id, secrets=hidden)"
 }
+
+/** The one rule for saving: a name always, and a password for the Login category. */
+fun canSaveCredential(serviceName: String, password: String, category: String): Boolean =
+    serviceName.isNotBlank() && (category != Categories.LOGIN.key || password.isNotEmpty())

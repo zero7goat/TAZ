@@ -5,6 +5,8 @@ import com.zero7goat.taz.core.database.TazDatabase
 import com.zero7goat.taz.core.database.TrashRow
 import com.zero7goat.taz.core.security.KeystoreFieldCipher
 import com.zero7goat.taz.core.storage.VaultFileStore
+import com.zero7goat.taz.core.tags.TagRepository
+import com.zero7goat.taz.core.tags.TagTarget
 import com.zero7goat.taz.features.files.data.FileRepository
 import com.zero7goat.taz.features.notes.data.NoteImageStore
 import com.zero7goat.taz.features.notes.data.NoteRepository
@@ -23,7 +25,9 @@ class TrashRepository(
     private val notes: NoteRepository,
     private val credentials: CredentialRepository,
     private val files: FileRepository,
-    private val now: () -> Long = { System.currentTimeMillis() }
+    private val now: () -> Long = { System.currentTimeMillis() },
+    /** Removes the tag links of permanently deleted items. */
+    private val tags: TagRepository? = null
 ) {
 
     /** Everything in the trash, most recently deleted first. */
@@ -46,9 +50,9 @@ class TrashRepository(
     /** Permanently deletes everything currently in the trash. Returns how many items were removed. */
     suspend fun emptyTrash(): Int {
         var count = 0
-        notes.trashedIds().forEach { notes.purgeNote(it); count++ }
-        credentials.trashedIds().forEach { credentials.purge(it); count++ }
-        files.trashedIds().forEach { files.purge(it); count++ }
+        notes.trashedIds().forEach { purge(TrashKind.NOTE, it); count++ }
+        credentials.trashedIds().forEach { purge(TrashKind.LOGIN, it); count++ }
+        files.trashedIds().forEach { purge(TrashKind.FILE, it); count++ }
         return count
     }
 
@@ -56,17 +60,17 @@ class TrashRepository(
     suspend fun purgeExpired(): Int {
         val cutoff = TrashRules.expiryCutoff(now())
         var count = 0
-        notes.trashedBefore(cutoff).forEach { notes.purgeNote(it); count++ }
-        credentials.trashedBefore(cutoff).forEach { credentials.purge(it); count++ }
-        files.trashedBefore(cutoff).forEach { files.purge(it); count++ }
+        notes.trashedBefore(cutoff).forEach { purge(TrashKind.NOTE, it); count++ }
+        credentials.trashedBefore(cutoff).forEach { purge(TrashKind.LOGIN, it); count++ }
+        files.trashedBefore(cutoff).forEach { purge(TrashKind.FILE, it); count++ }
         return count
     }
 
     private suspend fun purge(kind: TrashKind, id: String) {
         when (kind) {
-            TrashKind.NOTE -> notes.purgeNote(id)
-            TrashKind.LOGIN -> credentials.purge(id)
-            TrashKind.FILE -> files.purge(id)
+            TrashKind.NOTE -> notes.purgeNote(id).also { tags?.forgetItem(TagTarget.NOTE, id) }
+            TrashKind.LOGIN -> credentials.purge(id).also { tags?.forgetItem(TagTarget.LOGIN, id) }
+            TrashKind.FILE -> files.purge(id).also { tags?.forgetItem(TagTarget.FILE, id) }
         }
     }
 
@@ -80,7 +84,8 @@ class TrashRepository(
             return TrashRepository(
                 notes = NoteRepository(database.noteDao(), NoteImageStore(app.filesDir)),
                 credentials = CredentialRepository(database.credentialDao(), KeystoreFieldCipher()),
-                files = FileRepository(database.fileDao(), VaultFileStore(app.filesDir), app)
+                files = FileRepository(database.fileDao(), VaultFileStore(app.filesDir), app),
+                tags = TagRepository(database.tagDao())
             )
         }
     }

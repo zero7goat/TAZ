@@ -1,6 +1,9 @@
 package com.zero7goat.taz.features.passwords.presentation
 
 import com.zero7goat.taz.core.security.FieldCipher
+import com.zero7goat.taz.core.fields.CustomField
+import com.zero7goat.taz.core.fields.CustomFields
+import org.json.JSONArray
 import org.json.JSONObject
 
 /** The text of a login form that has not been saved yet. [toString] hides everything. */
@@ -9,7 +12,9 @@ class DraftFields(
     val username: String,
     val password: String,
     val websiteUrl: String,
-    val notes: String
+    val notes: String,
+    val category: String = "login",
+    val fields: List<CustomField> = emptyList()
 ) {
     override fun toString(): String = "DraftFields(hidden)"
 }
@@ -31,6 +36,8 @@ object DraftSnapshot {
             .put("password", fields.password)
             .put("websiteUrl", fields.websiteUrl)
             .put("notes", fields.notes)
+            .put("category", fields.category)
+            .put("fields", JSONArray(CustomFields.encode(fields.fields)))
             .toString()
         return cipher.encrypt(json, aad(loginId))
     }
@@ -44,7 +51,9 @@ object DraftSnapshot {
                 username = json.optString("username"),
                 password = json.optString("password"),
                 websiteUrl = json.optString("websiteUrl"),
-                notes = json.optString("notes")
+                notes = json.optString("notes"),
+                category = json.optString("category", "login").ifBlank { "login" },
+                fields = json.optJSONArray("fields")?.let { CustomFields.decode(it.toString()) }.orEmpty()
             )
         } catch (e: Exception) {
             null

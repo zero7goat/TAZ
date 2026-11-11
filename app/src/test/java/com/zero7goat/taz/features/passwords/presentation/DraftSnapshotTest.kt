@@ -1,5 +1,7 @@
 package com.zero7goat.taz.features.passwords.presentation
 
+import com.zero7goat.taz.core.fields.CustomField
+import com.zero7goat.taz.core.fields.FieldType
 import com.zero7goat.taz.core.security.AesGcmFieldCipher
 import javax.crypto.KeyGenerator
 import org.junit.Assert.assertEquals
@@ -30,6 +32,26 @@ class DraftSnapshotTest {
         assertEquals(fields.password, restored.password)
         assertEquals(fields.websiteUrl, restored.websiteUrl)
         assertEquals(fields.notes, restored.notes)
+    }
+
+    @Test
+    fun keepsCategoryAndCustomFieldsEncrypted() {
+        val withFields = DraftFields(
+            "Home Wi-Fi", "", "", "", "",
+            category = "wifi",
+            fields = listOf(CustomField("f1", "Password", FieldType.SECRET, "synthetic-wifi-key"))
+        )
+        val blob = DraftSnapshot.encode(withFields, "id-1", cipher)
+        assertFalse(String(blob, Charsets.ISO_8859_1).contains("synthetic-wifi-key"))
+        val restored = DraftSnapshot.decode(blob, "id-1", cipher)!!
+        assertEquals("wifi", restored.category)
+        assertEquals(withFields.fields, restored.fields)
+    }
+
+    @Test
+    fun draftsFrom11WithoutCategoryReadAsLogins() {
+        val restored = DraftSnapshot.decode(DraftSnapshot.encode(fields, "id-1", cipher), "id-1", cipher)!!
+        assertEquals("login", restored.category)
     }
 
     @Test

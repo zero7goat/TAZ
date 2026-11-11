@@ -4,6 +4,12 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import com.zero7goat.taz.core.tags.ItemTagEntity
+import com.zero7goat.taz.core.tags.TagDao
+import com.zero7goat.taz.core.tags.TagEntity
+import com.zero7goat.taz.features.notes.data.NoteFieldsEntity
+import com.zero7goat.taz.features.passwords.data.CategoryDao
+import com.zero7goat.taz.features.passwords.data.CategoryEntity
 import com.zero7goat.taz.features.files.data.FileDao
 import com.zero7goat.taz.features.files.data.FileEntity
 import com.zero7goat.taz.features.notes.data.NoteDao
@@ -16,13 +22,20 @@ import com.zero7goat.taz.features.passwords.data.CredentialEntity
  * migration in [TazMigrations]. Destructive fallback is deliberately never enabled.
  */
 @Database(
-    entities = [FolderEntity::class, NoteEntity::class, CredentialEntity::class, FileEntity::class],
-    version = 6,
+    entities = [
+        FolderEntity::class, NoteEntity::class, CredentialEntity::class, FileEntity::class,
+        TagEntity::class, ItemTagEntity::class, CategoryEntity::class, NoteFieldsEntity::class
+    ],
+    version = 7,
     exportSchema = true
 )
 abstract class TazDatabase : RoomDatabase() {
 
     abstract fun folderDao(): FolderDao
+
+    abstract fun tagDao(): TagDao
+
+    abstract fun categoryDao(): CategoryDao
 
     abstract fun noteDao(): NoteDao
 

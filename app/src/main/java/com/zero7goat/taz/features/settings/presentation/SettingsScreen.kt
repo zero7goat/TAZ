@@ -29,6 +29,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
@@ -105,6 +106,8 @@ fun SettingsScreen(
     onMessage: (String) -> Unit,
     onOpenTrash: () -> Unit,
     onOpenPasswordHealth: () -> Unit,
+    onOpenTags: () -> Unit,
+    onOpenCategories: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -200,23 +203,27 @@ fun SettingsScreen(
         }
 
         SectionLabel("Tools")
-        SettingRow("Trash", null) { onOpenTrash() }
+        SettingRow("Tags", null, icon = TazIcons.Tag) { onOpenTags() }
         RowDivider()
-        SettingRow("Password health", null) { onOpenPasswordHealth() }
+        SettingRow("Login categories", null, icon = TazIcons.Category) { onOpenCategories() }
+        RowDivider()
+        SettingRow("Trash", null, icon = TazIcons.Trash) { onOpenTrash() }
+        RowDivider()
+        SettingRow("Password health", null, icon = TazIcons.Shield) { onOpenPasswordHealth() }
 
         SectionLabel("Backup")
-        SettingRow("Back up to a file", null, enabled = !busy) {
+        SettingRow("Back up to a file", null, enabled = !busy, icon = TazIcons.Backup) {
             scope.launch {
                 val unreadable = viewModel.prepareBackup()
                 dialog = if (unreadable > 0) SettingsDialog.UnreadableLogins(unreadable) else SettingsDialog.BackupPassphrase
             }
         }
         RowDivider()
-        SettingRow("Restore from a file", null, enabled = !busy) {
+        SettingRow("Restore from a file", null, enabled = !busy, icon = TazIcons.Restore) {
             launchOrReport(onMessage) { pickRestore.launch(arrayOf("*/*")) }
         }
         RowDivider()
-        SettingRow("Export to spreadsheet (.xlsx)", null, enabled = !busy) { dialog = SettingsDialog.ExportInfo }
+        SettingRow("Export to spreadsheet (.xlsx)", null, enabled = !busy, icon = TazIcons.File) { dialog = SettingsDialog.ExportInfo }
         Text(
             text = "Backups are encrypted with a passphrase you choose and saved only where you pick. Nothing is " +
                 "uploaded or backed up automatically. Spreadsheet exports are not encrypted and never include passwords.",
@@ -380,7 +387,13 @@ private fun RowDivider() {
 }
 
 @Composable
-private fun SettingRow(title: String, value: String?, enabled: Boolean = true, onClick: () -> Unit) {
+private fun SettingRow(
+    title: String,
+    value: String?,
+    enabled: Boolean = true,
+    icon: ImageVector? = null,
+    onClick: () -> Unit
+) {
     val textColor = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
     Row(
         modifier = Modifier
@@ -390,6 +403,15 @@ private fun SettingRow(title: String, value: String?, enabled: Boolean = true, o
             .padding(horizontal = 20.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
+        if (icon != null) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(22.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (enabled) 1f else 0.38f)
+            )
+            Spacer(Modifier.size(16.dp))
+        }
         Text(
             text = title,
             modifier = Modifier.weight(1f),

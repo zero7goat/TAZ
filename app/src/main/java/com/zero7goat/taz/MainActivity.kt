@@ -11,6 +11,8 @@ import androidx.lifecycle.repeatOnLifecycle
 import com.zero7goat.taz.core.AppContainer
 import com.zero7goat.taz.core.AppShortcuts
 import com.zero7goat.taz.core.backup.BackupService
+import com.zero7goat.taz.core.database.TazDatabase
+import com.zero7goat.taz.core.tags.TagRepository
 import com.zero7goat.taz.core.security.AppLockManager
 import com.zero7goat.taz.core.security.SecureWindow
 import com.zero7goat.taz.core.ui.TazApp
@@ -71,6 +73,13 @@ class MainActivity : FragmentActivity() {
                 TrashRepository.create(applicationContext).purgeExpired()
             } catch (e: Exception) {
                 // Left for the next start; nothing is lost by waiting.
+            }
+            // Tag links of items that no longer exist at all (for example a new login that was never
+            // saved). Links of items in the trash are kept so restoring brings their tags back.
+            try {
+                TagRepository(TazDatabase.getInstance(applicationContext).tagDao()).cleanupOrphans()
+            } catch (e: Exception) {
+                // Harmless leftovers; tried again next start.
             }
         }
 

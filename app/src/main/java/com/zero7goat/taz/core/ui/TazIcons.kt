@@ -62,7 +62,7 @@ object TazIcons {
 
     val Plus: ImageVector by lazy {
         tazIcon("Plus") {
-            outline(2f) {
+            outline(1.8f) {
                 moveTo(12f, 5f); verticalLineTo(19f)
                 moveTo(5f, 12f); horizontalLineTo(19f)
             }
@@ -80,14 +80,14 @@ object TazIcons {
 
     val ChevronRight: ImageVector by lazy {
         tazIcon("ChevronRight") {
-            outline(2f) {
+            outline(1.8f) {
                 moveTo(9.5f, 6f); lineTo(15.5f, 12f); lineTo(9.5f, 18f)
             }
         }
     }
     val ChevronLeft: ImageVector by lazy {
         tazIcon("ChevronLeft") {
-            outline(2f) {
+            outline(1.8f) {
                 moveTo(14.5f, 6f); lineTo(8.5f, 12f); lineTo(14.5f, 18f)
             }
         }
@@ -283,7 +283,7 @@ object TazIcons {
 
     val Close: ImageVector by lazy {
         tazIcon("Close") {
-            outline(1.9f) {
+            outline(1.8f) {
                 moveTo(6f, 6f); lineTo(18f, 18f)
                 moveTo(18f, 6f); lineTo(6f, 18f)
             }
@@ -292,7 +292,7 @@ object TazIcons {
 
     val Check: ImageVector by lazy {
         tazIcon("Check") {
-            outline(2.2f) {
+            outline(1.8f) {
                 moveTo(5f, 12.5f); lineTo(9.5f, 17f); lineTo(19f, 7.5f)
             }
         }
@@ -326,6 +326,367 @@ object TazIcons {
                 moveTo(10.7f, 12.8f); lineTo(19.5f, 4f)
                 moveTo(16.5f, 7f); lineTo(19f, 9.5f)
                 moveTo(14.2f, 9.3f); lineTo(16.2f, 11.3f)
+            }
+        }
+    }
+
+    // ---------- added in 1.2: tags, categories, fields, viewer ----------
+
+    val Tag: ImageVector by lazy {
+        tazIcon("Tag") {
+            outline(1.8f) {
+                moveTo(3.5f, 4.5f); verticalLineTo(11.2f); lineTo(12.8f, 20.5f)
+                lineTo(20.5f, 12.8f); lineTo(11.2f, 3.5f); horizontalLineTo(4.5f)
+                close()
+                circle(8f, 8f, 1.3f)
+            }
+        }
+    }
+
+    val Wifi: ImageVector by lazy {
+        tazIcon("Wifi") {
+            outline(1.8f) {
+                moveTo(3f, 9.5f); curveTo(8f, 4.8f, 16f, 4.8f, 21f, 9.5f)
+                moveTo(6f, 12.8f); curveTo(9.4f, 9.8f, 14.6f, 9.8f, 18f, 12.8f)
+                moveTo(9f, 16f); curveTo(10.7f, 14.6f, 13.3f, 14.6f, 15f, 16f)
+                moveTo(12f, 19.2f); lineTo(12.01f, 19.2f)
+            }
+        }
+    }
+
+    val Bank: ImageVector by lazy {
+        tazIcon("Bank") {
+            outline(1.8f) {
+                moveTo(3.5f, 9f); lineTo(12f, 4f); lineTo(20.5f, 9f); close()
+                moveTo(6f, 11.5f); verticalLineTo(17f)
+                moveTo(10f, 11.5f); verticalLineTo(17f)
+                moveTo(14f, 11.5f); verticalLineTo(17f)
+                moveTo(18f, 11.5f); verticalLineTo(17f)
+                moveTo(3.5f, 20f); horizontalLineTo(20.5f)
+            }
+        }
+    }
+
+    val Card: ImageVector by lazy {
+        tazIcon("Card") {
+            outline(1.8f) {
+                moveTo(3.5f, 6f); horizontalLineTo(20.5f); verticalLineTo(18f); horizontalLineTo(3.5f); close()
+                moveTo(3.5f, 10f); horizontalLineTo(20.5f)
+                moveTo(7f, 14.5f); horizontalLineTo(10f)
+            }
+        }
+    }
+
+    val IdCard: ImageVector by lazy {
+        tazIcon("IdCard") {
+            outline(1.8f) {
+                moveTo(3.5f, 5.5f); horizontalLineTo(20.5f); verticalLineTo(18.5f); horizontalLineTo(3.5f); close()
+                circle(9f, 10.5f, 2f)
+                moveTo(6f, 15.5f); curveTo(6.8f, 13.9f, 11.2f, 13.9f, 12f, 15.5f)
+                moveTo(14.5f, 10f); horizontalLineTo(18f)
+                moveTo(14.5f, 13.5f); horizontalLineTo(17f)
+            }
+        }
+    }
+
+    val License: ImageVector by lazy {
+        tazIcon("License") {
+            outline(1.8f) {
+                moveTo(5f, 3.5f); horizontalLineTo(19f); verticalLineTo(14f)
+                moveTo(5f, 3.5f); verticalLineTo(20.5f); horizontalLineTo(11f)
+                moveTo(8.5f, 8f); horizontalLineTo(15.5f)
+                moveTo(8.5f, 11.5f); horizontalLineTo(12.5f)
+                circle(16f, 17f, 2.3f)
+                moveTo(14.6f, 18.9f); lineTo(14f, 21.5f); lineTo(16f, 20.5f); lineTo(18f, 21.5f); lineTo(17.4f, 18.9f)
+            }
+        }
+    }
+
+    val Category: ImageVector by lazy {
+        tazIcon("Category") {
+            outline(1.8f) {
+                moveTo(4f, 4f); horizontalLineTo(10f); verticalLineTo(10f); horizontalLineTo(4f); close()
+                moveTo(14f, 4f); horizontalLineTo(20f); verticalLineTo(10f); horizontalLineTo(14f); close()
+                moveTo(4f, 14f); horizontalLineTo(10f); verticalLineTo(20f); horizontalLineTo(4f); close()
+                circle(17f, 17f, 3f)
+            }
+        }
+    }
+
+    val Copy: ImageVector by lazy {
+        tazIcon("Copy") {
+            outline(1.8f) {
+                moveTo(9f, 8.5f); horizontalLineTo(19.5f); verticalLineTo(20.5f); horizontalLineTo(9f); close()
+                moveTo(15f, 8.5f); verticalLineTo(4.5f); horizontalLineTo(4.5f); verticalLineTo(16f); horizontalLineTo(9f)
+            }
+        }
+    }
+
+    val Edit: ImageVector by lazy {
+        tazIcon("Edit") {
+            outline(1.8f) {
+                moveTo(4.5f, 19.5f); lineTo(5.2f, 15.6f); lineTo(15.8f, 5f); lineTo(19f, 8.2f)
+                lineTo(8.4f, 18.8f); close()
+                moveTo(13.5f, 7.3f); lineTo(16.7f, 10.5f)
+            }
+        }
+    }
+
+    val Restore: ImageVector by lazy {
+        tazIcon("Restore") {
+            outline(1.8f) {
+                moveTo(4.5f, 12f); curveTo(4.5f, 7.9f, 7.9f, 4.5f, 12f, 4.5f)
+                curveTo(16.1f, 4.5f, 19.5f, 7.9f, 19.5f, 12f)
+                curveTo(19.5f, 16.1f, 16.1f, 19.5f, 12f, 19.5f)
+                curveTo(9.6f, 19.5f, 7.5f, 18.4f, 6.1f, 16.7f)
+                moveTo(2.5f, 9.8f); lineTo(4.5f, 12.3f); lineTo(7f, 10.2f)
+                moveTo(12f, 8f); verticalLineTo(12f); lineTo(14.8f, 13.8f)
+            }
+        }
+    }
+
+    val ZoomIn: ImageVector by lazy {
+        tazIcon("ZoomIn") {
+            outline(1.8f) {
+                circle(10.5f, 10.5f, 6f)
+                moveTo(15f, 15f); lineTo(20f, 20f)
+                moveTo(10.5f, 8f); verticalLineTo(13f)
+                moveTo(8f, 10.5f); horizontalLineTo(13f)
+            }
+        }
+    }
+
+    val ZoomOut: ImageVector by lazy {
+        tazIcon("ZoomOut") {
+            outline(1.8f) {
+                circle(10.5f, 10.5f, 6f)
+                moveTo(15f, 15f); lineTo(20f, 20f)
+                moveTo(8f, 10.5f); horizontalLineTo(13f)
+            }
+        }
+    }
+
+    /** Fit to screen: four corner brackets. */
+    val FitScreen: ImageVector by lazy {
+        tazIcon("FitScreen") {
+            outline(1.8f) {
+                moveTo(4f, 9f); verticalLineTo(4f); horizontalLineTo(9f)
+                moveTo(15f, 4f); horizontalLineTo(20f); verticalLineTo(9f)
+                moveTo(20f, 15f); verticalLineTo(20f); horizontalLineTo(15f)
+                moveTo(9f, 20f); horizontalLineTo(4f); verticalLineTo(15f)
+            }
+        }
+    }
+
+    /** Actual size: a 1:1 mark in a frame. */
+    val ActualSize: ImageVector by lazy {
+        tazIcon("ActualSize") {
+            outline(1.8f) {
+                moveTo(3.5f, 5f); horizontalLineTo(20.5f); verticalLineTo(19f); horizontalLineTo(3.5f); close()
+                moveTo(7.5f, 10f); lineTo(9f, 9f); verticalLineTo(15f)
+                moveTo(15f, 10f); lineTo(16.5f, 9f); verticalLineTo(15f)
+                moveTo(12f, 10.5f); lineTo(12.01f, 10.5f)
+                moveTo(12f, 13.5f); lineTo(12.01f, 13.5f)
+            }
+        }
+    }
+
+    val Calendar: ImageVector by lazy {
+        tazIcon("Calendar") {
+            outline(1.8f) {
+                moveTo(4f, 6f); horizontalLineTo(20f); verticalLineTo(20f); horizontalLineTo(4f); close()
+                moveTo(4f, 10f); horizontalLineTo(20f)
+                moveTo(8f, 3.5f); verticalLineTo(7.5f)
+                moveTo(16f, 3.5f); verticalLineTo(7.5f)
+            }
+        }
+    }
+
+    val Phone: ImageVector by lazy {
+        tazIcon("Phone") {
+            outline(1.8f) {
+                moveTo(7.5f, 3f); horizontalLineTo(16.5f); verticalLineTo(21f); horizontalLineTo(7.5f); close()
+                moveTo(11f, 18f); horizontalLineTo(13f)
+            }
+        }
+    }
+
+    val Mail: ImageVector by lazy {
+        tazIcon("Mail") {
+            outline(1.8f) {
+                moveTo(3.5f, 6f); horizontalLineTo(20.5f); verticalLineTo(18f); horizontalLineTo(3.5f); close()
+                moveTo(3.5f, 6.5f); lineTo(12f, 13f); lineTo(20.5f, 6.5f)
+            }
+        }
+    }
+
+    val Globe: ImageVector by lazy {
+        tazIcon("Globe") {
+            outline(1.8f) {
+                circle(12f, 12f, 8.5f)
+                moveTo(3.5f, 12f); horizontalLineTo(20.5f)
+                moveTo(12f, 3.5f); curveTo(14.4f, 6f, 15.5f, 9f, 15.5f, 12f)
+                curveTo(15.5f, 15f, 14.4f, 18f, 12f, 20.5f)
+                curveTo(9.6f, 18f, 8.5f, 15f, 8.5f, 12f)
+                curveTo(8.5f, 9f, 9.6f, 6f, 12f, 3.5f)
+            }
+        }
+    }
+
+    val Hash: ImageVector by lazy {
+        tazIcon("Hash") {
+            outline(1.8f) {
+                moveTo(9.5f, 4f); lineTo(7.5f, 20f)
+                moveTo(16.5f, 4f); lineTo(14.5f, 20f)
+                moveTo(4.5f, 9f); horizontalLineTo(19.5f)
+                moveTo(4f, 15f); horizontalLineTo(19f)
+            }
+        }
+    }
+
+    val TextLines: ImageVector by lazy {
+        tazIcon("TextLines") {
+            outline(1.8f) {
+                moveTo(4.5f, 6.5f); horizontalLineTo(19.5f)
+                moveTo(4.5f, 11f); horizontalLineTo(19.5f)
+                moveTo(4.5f, 15.5f); horizontalLineTo(15f)
+                moveTo(4.5f, 20f); horizontalLineTo(11f)
+            }
+        }
+    }
+
+    /** Word wrap: a line that bends back under itself. */
+    val Wrap: ImageVector by lazy {
+        tazIcon("Wrap") {
+            outline(1.8f) {
+                moveTo(4.5f, 6.5f); horizontalLineTo(19.5f)
+                moveTo(4.5f, 12f); horizontalLineTo(16.5f)
+                curveTo(18.2f, 12f, 19.5f, 13.3f, 19.5f, 15f)
+                curveTo(19.5f, 16.7f, 18.2f, 18f, 16.5f, 18f)
+                horizontalLineTo(12.5f)
+                moveTo(14.5f, 16f); lineTo(12.5f, 18f); lineTo(14.5f, 20f)
+                moveTo(4.5f, 18f); horizontalLineTo(8.5f)
+            }
+        }
+    }
+
+    val Toggle: ImageVector by lazy {
+        tazIcon("Toggle") {
+            outline(1.8f) {
+                pill(3.5f, 7f, 20.5f, 17f)
+                circle(15.5f, 12f, 2.6f)
+            }
+        }
+    }
+
+    val ArrowUp: ImageVector by lazy {
+        tazIcon("ArrowUp") {
+            outline(1.8f) {
+                moveTo(12f, 19f); verticalLineTo(5f)
+                moveTo(6.5f, 10.5f); lineTo(12f, 5f); lineTo(17.5f, 10.5f)
+            }
+        }
+    }
+
+    val ArrowDown: ImageVector by lazy {
+        tazIcon("ArrowDown") {
+            outline(1.8f) {
+                moveTo(12f, 5f); verticalLineTo(19f)
+                moveTo(6.5f, 13.5f); lineTo(12f, 19f); lineTo(17.5f, 13.5f)
+            }
+        }
+    }
+
+    val ChevronDown: ImageVector by lazy {
+        tazIcon("ChevronDown") {
+            outline(1.8f) {
+                moveTo(6f, 9.5f); lineTo(12f, 15.5f); lineTo(18f, 9.5f)
+            }
+        }
+    }
+
+    val ChevronUp: ImageVector by lazy {
+        tazIcon("ChevronUp") {
+            outline(1.8f) {
+                moveTo(6f, 14.5f); lineTo(12f, 8.5f); lineTo(18f, 14.5f)
+            }
+        }
+    }
+
+    val Filter: ImageVector by lazy {
+        tazIcon("Filter") {
+            outline(1.8f) {
+                moveTo(4f, 6f); horizontalLineTo(20f)
+                moveTo(7f, 12f); horizontalLineTo(17f)
+                moveTo(10f, 18f); horizontalLineTo(14f)
+            }
+        }
+    }
+
+    val Share: ImageVector by lazy {
+        tazIcon("Share") {
+            outline(1.8f) {
+                circle(17.5f, 5.5f, 2.3f)
+                circle(6.5f, 12f, 2.3f)
+                circle(17.5f, 18.5f, 2.3f)
+                moveTo(8.5f, 10.8f); lineTo(15.5f, 6.7f)
+                moveTo(8.5f, 13.2f); lineTo(15.5f, 17.3f)
+            }
+        }
+    }
+
+    val OpenExternal: ImageVector by lazy {
+        tazIcon("OpenExternal") {
+            outline(1.8f) {
+                moveTo(10.5f, 5f); horizontalLineTo(5f); verticalLineTo(19f); horizontalLineTo(19f); verticalLineTo(13.5f)
+                moveTo(14f, 4.5f); horizontalLineTo(19.5f); verticalLineTo(10f)
+                moveTo(19.5f, 4.5f); lineTo(11.5f, 12.5f)
+            }
+        }
+    }
+
+    val Page: ImageVector by lazy {
+        tazIcon("Page") {
+            outline(1.8f) {
+                moveTo(6f, 3.5f); horizontalLineTo(18f); verticalLineTo(20.5f); horizontalLineTo(6f); close()
+                moveTo(9f, 8f); horizontalLineTo(15f)
+            }
+        }
+    }
+
+    val Generate: ImageVector by lazy {
+        tazIcon("Generate") {
+            outline(1.8f) {
+                moveTo(4.5f, 19.5f); lineTo(15f, 9f)
+                moveTo(13f, 7f); lineTo(17f, 11f)
+                moveTo(18f, 3.5f); verticalLineTo(6.5f)
+                moveTo(16.5f, 5f); horizontalLineTo(19.5f)
+                moveTo(9f, 3.5f); verticalLineTo(5.5f)
+                moveTo(8f, 4.5f); horizontalLineTo(10f)
+                moveTo(19.5f, 13f); verticalLineTo(15f)
+                moveTo(18.5f, 14f); horizontalLineTo(20.5f)
+            }
+        }
+    }
+
+    val Info: ImageVector by lazy {
+        tazIcon("Info") {
+            outline(1.8f) {
+                circle(12f, 12f, 8.5f)
+                moveTo(12f, 11f); verticalLineTo(16.5f)
+                moveTo(12f, 7.6f); lineTo(12.01f, 7.6f)
+            }
+        }
+    }
+
+    val Backup: ImageVector by lazy {
+        tazIcon("Backup") {
+            outline(1.8f) {
+                // An archive box (backups are files on the device, never a cloud).
+                moveTo(3.5f, 4.5f); horizontalLineTo(20.5f); verticalLineTo(8.5f); horizontalLineTo(3.5f); close()
+                moveTo(5f, 8.5f); verticalLineTo(19.5f); horizontalLineTo(19f); verticalLineTo(8.5f)
+                moveTo(12f, 11f); verticalLineTo(16.5f)
+                moveTo(9.5f, 14f); lineTo(12f, 16.5f); lineTo(14.5f, 14f)
             }
         }
     }

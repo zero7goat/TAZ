@@ -1,7 +1,10 @@
 package com.zero7goat.taz.features.passwords.data
 
 import com.zero7goat.taz.core.database.TrashRow
+import com.zero7goat.taz.core.fields.CustomField
+import com.zero7goat.taz.core.fields.FieldType
 import com.zero7goat.taz.core.security.AesGcmFieldCipher
+import org.junit.Assert.assertFalse
 import com.zero7goat.taz.features.passwords.domain.CredentialDetail
 import com.zero7goat.taz.features.passwords.domain.CredentialInput
 import javax.crypto.KeyGenerator
@@ -153,5 +156,89 @@ class CredentialBackupCompatTest {
         assertEquals(listOf("id-1"), repository.trashedIds())
         assertEquals(listOf("id-1"), repository.trashedBefore(2_000L))
         assertTrue(repository.trashedBefore(500L).isEmpty())
+    }
+
+    // ---------- 1.2: categories and custom fields ----------
+
+    private val cardFields = listOf(
+        CustomField("f1", "Cardholder", FieldType.TEXT, "Synthetic Person"),
+        CustomField("f2", "Card number", FieldType.NUMBER, "4000000000000002", hidden = true),
+        CustomField("f3", "Backup code", FieldType.SECRET, "synthetic-secret-field")
+    )
+
+    @Test
+    fun customFieldsAreStoredOnlyEncryptedAndReadBack() = runBlocking {
+        val dao = FakeDao()
+        val key = newKey()
+        val repository = CredentialRepository(dao, AesGcmFieldCipher { key })
+        repository.save(
+            CredentialInput("card-1", null, "Test card", "", "", "", "", false, 0L, category = "card", fields = cardFields)
+        )
+        val stored = dao.rows.getValue("card-1")
+        assertEquals("card", stored.category)
+        val blob = String(stored.fieldsCipher!!, Charsets.ISO_8859_1)
+        assertFalse(blob.contains("4000000000000002"))
+        assertFalse(blob.contains("synthetic-secret-field"))
+        assertFalse(blob.contains("Card number"))
+
+        val detail = (repository.getDetail("card-1") as DetailResult.Found).detail
+        assertEquals(cardFields, detail.fields)
+        assertEquals("card", detail.category)
+    }
+
+    @Test
+    fun aFieldBlobCannotBeMovedToAnotherLogin() = runBlocking {
+        val dao = FakeDao()
+        val key = newKey()
+        val repository = CredentialRepository(dao, AesGcmFieldCipher { key })
+        repository.save(CredentialInput("a", null, "A", "", "", "", "", false, 0L, category = "other", fields = cardFields))
+        repository.save(CredentialInput("b", null, "B", "", "", "", "", false, 0L, category = "other"))
+        dao.rows["b"] = dao.rows.getValue("b").copy(fieldsCipher = dao.rows.getValue("a").fieldsCipher)
+        assertEquals(DetailResult.Unreadable, repository.getDetail("b"))
+    }
+
+    @Test
+    fun searchNeverSeesPasswordsOrHiddenValues() = runBlocking {
+        val dao = FakeDao()
+        val key = newKey()
+        val repository = CredentialRepository(dao, AesGcmFieldCipher { key })
+        repository.save(
+            CredentialInput("c", null, "Card", "someone", "password-marker", "", "notes", false, 0L, category = "card", fields = cardFields)
+        )
+        val searchable = repository.decryptForSearch().single()
+        val everything = listOf(searchable.username, searchable.notes) + searchable.fields.flatMap { listOf(it.label, it.value) }
+        assertFalse(everything.any { it.contains("password-marker") })
+        assertFalse(everything.any { it.contains("4000000000000002") })
+        assertFalse(everything.any { it.contains("synthetic-secret-field") })
+        assertTrue(everything.contains("Card number")) // labels of hidden fields stay searchable
+        assertTrue(everything.contains("Synthetic Person"))
+    }
+
+    @Test
+    fun nonLoginCategoriesMaySaveWithoutAPassword() = runBlocking {
+        val dao = FakeDao()
+        val key = newKey()
+        val repository = CredentialRepository(dao, AesGcmFieldCipher { key })
+        repository.save(CredentialInput("w", null, "Home Wi-Fi", "", "", "", "", false, 0L, category = "wifi"))
+        assertEquals("wifi", dao.rows.getValue("w").category)
+        try {
+            repository.save(CredentialInput("l", null, "Mail", "", "", "", "", false, 0L, category = "login"))
+            org.junit.Assert.fail("a login without a password must be refused")
+        } catch (expected: IllegalArgumentException) {
+            assertTrue(dao.rows["l"] == null)
+        }
+    }
+
+    @Test
+    fun loginsFrom11WithoutFieldsStillDecrypt() = runBlocking {
+        // Rows written before 1.2 have the default category and no field blob.
+        val dao = FakeDao()
+        val key = newKey()
+        val repository = CredentialRepository(dao, AesGcmFieldCipher { key })
+        repository.save(CredentialInput("old", null, "Old", "u", "p", "", "", false, 0L))
+        dao.rows["old"] = dao.rows.getValue("old").copy(fieldsCipher = null, category = "login")
+        val detail = (repository.getDetail("old") as DetailResult.Found).detail
+        assertTrue(detail.fields.isEmpty())
+        assertEquals("p", detail.password)
     }
 }

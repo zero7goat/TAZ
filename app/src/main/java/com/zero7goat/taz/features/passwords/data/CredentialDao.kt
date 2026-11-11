@@ -19,7 +19,7 @@ interface CredentialDao {
 
     /** List data only: no password or note ciphertext is loaded. Alphabetical by name. */
     @Query(
-        "SELECT id, folderId, serviceName, websiteUrl, domain, usernameCipher, isFavorite, updatedAt " +
+        "SELECT id, folderId, serviceName, websiteUrl, domain, usernameCipher, isFavorite, updatedAt, category, createdAt " +
             "FROM credentials WHERE deletedAt IS NULL ORDER BY serviceName COLLATE NOCASE ASC"
     )
     fun observeListRows(): Flow<List<CredentialListRow>>

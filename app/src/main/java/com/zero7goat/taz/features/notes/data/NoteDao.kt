@@ -3,6 +3,7 @@ package com.zero7goat.taz.features.notes.data
 import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Upsert
 import com.zero7goat.taz.core.database.TrashRow
 import kotlinx.coroutines.flow.Flow
@@ -67,6 +68,30 @@ interface NoteDao {
 
     @Insert
     suspend fun insertAll(notes: List<NoteEntity>)
+
+    // Custom fields (one encrypted blob per note, in their own table).
+
+    @Query("SELECT * FROM note_fields WHERE noteId = :noteId")
+    suspend fun getFields(noteId: String): NoteFieldsEntity?
+
+    @Upsert
+    suspend fun upsertFields(fields: NoteFieldsEntity)
+
+    @Query("DELETE FROM note_fields WHERE noteId = :noteId")
+    suspend fun deleteFields(noteId: String)
+
+    /** Saves the note and its fields together: either both change or neither does. */
+    @Transaction
+    suspend fun saveWithFields(note: NoteEntity, fields: NoteFieldsEntity?) {
+        upsert(note)
+        if (fields == null) deleteFields(note.id) else upsertFields(fields)
+    }
+
+    @Query("SELECT * FROM note_fields WHERE noteId IN (SELECT id FROM notes WHERE deletedAt IS NULL)")
+    suspend fun getAllActiveFields(): List<NoteFieldsEntity>
+
+    @Insert
+    suspend fun insertAllFields(fields: List<NoteFieldsEntity>)
 
     @Query("DELETE FROM notes")
     suspend fun deleteAll()

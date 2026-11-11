@@ -107,7 +107,8 @@ class TrashMigrationTest {
     @Test
     fun migrationListIsRegisteredAndContinuousFrom1To6() {
         val versions = TazMigrations.ALL.map { it.startVersion to it.endVersion }
-        assertEquals(listOf(1 to 2, 2 to 3, 3 to 4, 4 to 5, 5 to 6), versions)
+        // Later versions add their own migrations after these (see TagsMigrationTest).
+        assertEquals(listOf(1 to 2, 2 to 3, 3 to 4, 4 to 5, 5 to 6), versions.take(5))
     }
 
     // ---------- helpers ----------

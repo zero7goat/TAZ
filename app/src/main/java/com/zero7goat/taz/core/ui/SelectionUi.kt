@@ -40,6 +40,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.saveable.Saver
@@ -105,10 +106,21 @@ fun CollectionHeader(
                 more = moreSelectionActions
             )
         } else {
-            ScreenHeader(title = title, actions = actions)
+            val openSearch = LocalOpenSearch.current
+            ScreenHeader(title = title) {
+                if (openSearch != null) {
+                    IconButton(onClick = openSearch) {
+                        Icon(TazIcons.Search, contentDescription = "Search everything")
+                    }
+                }
+                actions()
+            }
         }
     }
 }
+
+/** Opens the vault-wide search. Provided by the app shell; null where search is not offered. */
+val LocalOpenSearch = staticCompositionLocalOf<(() -> Unit)?> { null }
 
 @Composable
 private fun SelectionBar(

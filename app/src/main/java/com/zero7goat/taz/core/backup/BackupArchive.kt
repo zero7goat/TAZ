@@ -1,5 +1,8 @@
 package com.zero7goat.taz.core.backup
 
+import com.zero7goat.taz.core.fields.CustomField
+import com.zero7goat.taz.core.fields.CustomFields
+import com.zero7goat.taz.core.tags.TagNames
 import com.zero7goat.taz.features.notes.data.NoteImageStore
 import java.io.ByteArrayOutputStream
 import java.io.File
@@ -44,12 +47,24 @@ internal object BackupPaths {
     const val CREDENTIALS = "data/credentials.json"
     const val FILES = "data/files.json"
     const val SETTINGS = "data/settings.json"
+    const val TAGS = "data/tags.json"
+    const val CATEGORIES = "data/categories.json"
     const val FILE_BLOB_PREFIX = "blobs/files/"
     const val NOTE_IMAGE_PREFIX = "blobs/notes/"
-    val DATA_ENTRIES = listOf(FOLDERS, NOTES, CREDENTIALS, FILES, SETTINGS)
+
+    /** Entries every backup has (version 1 and later). */
+    val DATA_ENTRIES_V1 = listOf(FOLDERS, NOTES, CREDENTIALS, FILES, SETTINGS)
+
+    /** Entries of the current version: version 2 (TAZ 1.2) adds tags and custom categories. */
+    val DATA_ENTRIES = DATA_ENTRIES_V1 + listOf(TAGS, CATEGORIES)
+
+    fun requiredEntries(version: Int) = if (version >= 2) DATA_ENTRIES else DATA_ENTRIES_V1
 
     const val FORMAT_NAME = "taz-backup"
-    const val CONTENT_VERSION = 1
+
+    /** Written by this version. Versions 1 (TAZ 1.0 / 1.1) and 2 can both be restored. */
+    const val CONTENT_VERSION = 2
+    const val OLDEST_READABLE_VERSION = 1
 
     private val SAFE_ID = Regex("^[A-Za-z0-9-]{1,64}$")
 
@@ -132,6 +147,8 @@ class BackupArchiveWriter(private val checkCancelled: () -> Unit = {}) {
         zip.putJson(BackupPaths.CREDENTIALS, credentialsJson(contents.credentials))
         zip.putJson(BackupPaths.FILES, filesJson(contents.files))
         zip.putJson(BackupPaths.SETTINGS, JSONObject(contents.settings as Map<*, *>).toString())
+        zip.putJson(BackupPaths.TAGS, tagsJson(contents.tags, contents.tagLinks))
+        zip.putJson(BackupPaths.CATEGORIES, categoriesJson(contents.categories))
 
         // Photos, PDFs and archives rarely compress: favor speed for file contents.
         zip.setLevel(Deflater.BEST_SPEED)
@@ -256,16 +273,20 @@ class BackupArchiveReader(
             }
             // Read to the very end so the last encrypted chunk (and "nothing after it") is verified too.
             while (input.read(buffer) >= 0) checkCancelled()
-            if (BackupPaths.DATA_ENTRIES.any { it !in json }) throw BackupException(BackupError.INCOMPLETE)
+            if (BackupPaths.requiredEntries(manifest.version).any { it !in json }) throw BackupException(BackupError.INCOMPLETE)
             if (seenBlobs.size != manifest.blobSizes.size) throw BackupException(BackupError.INCOMPLETE)
 
+            val tagsText = json[BackupPaths.TAGS]
             val contents = BackupContents(
                 folders = parseFolders(json.getValue(BackupPaths.FOLDERS)),
                 notes = parseNotes(json.getValue(BackupPaths.NOTES)),
                 credentials = parseCredentials(json.getValue(BackupPaths.CREDENTIALS)),
                 files = parseFiles(json.getValue(BackupPaths.FILES)),
-                settings = parseSettings(json.getValue(BackupPaths.SETTINGS))
-            )
+                settings = parseSettings(json.getValue(BackupPaths.SETTINGS)),
+                tags = tagsText?.let { parseTags(it) }.orEmpty(),
+                tagLinks = tagsText?.let { parseTagLinks(it) }.orEmpty(),
+                categories = json[BackupPaths.CATEGORIES]?.let { parseCategories(it) }.orEmpty()
+            ).withoutDanglingTagLinks()
             validate(contents, manifest, filesDir)
             return StagedBackup(
                 contents = contents,
@@ -291,6 +312,7 @@ class BackupArchiveReader(
     // ---------- manifest ----------
 
     private class Manifest(
+        val version: Int,
         val createdAt: Long,
         val blobSizes: Map<String, Long>,
         val missingFiles: Set<String>,
@@ -301,7 +323,10 @@ class BackupArchiveReader(
     private fun parseManifest(text: String): Manifest {
         val json = JSONObject(text)
         if (json.optString("format") != BackupPaths.FORMAT_NAME) throw BackupException(BackupError.INVALID_CONTENT)
-        if (json.optInt("version", -1) != BackupPaths.CONTENT_VERSION) throw BackupException(BackupError.UNSUPPORTED_VERSION)
+        val version = json.optInt("version", -1)
+        if (version !in BackupPaths.OLDEST_READABLE_VERSION..BackupPaths.CONTENT_VERSION) {
+            throw BackupException(BackupError.UNSUPPORTED_VERSION)
+        }
         val blobs = json.getJSONArray("blobs")
         if (blobs.length() > maxBlobs) throw BackupException(BackupError.TOO_LARGE)
         val sizes = LinkedHashMap<String, Long>()
@@ -314,6 +339,7 @@ class BackupArchiveReader(
             }
         }
         return Manifest(
+            version = version,
             createdAt = json.optLong("createdAt", 0L),
             blobSizes = sizes,
             missingFiles = json.optJSONArray("missingFiles").strings().toSet(),
@@ -396,7 +422,8 @@ class BackupArchiveReader(
             updatedAt = it.getLong("updatedAt"),
             isFavorite = it.getBoolean("isFavorite"),
             isPinned = it.getBoolean("isPinned"),
-            colorIndex = it.getInt("colorIndex")
+            colorIndex = it.getInt("colorIndex"),
+            fields = parseFieldList(it)
         )
     }
 
@@ -411,8 +438,52 @@ class BackupArchiveReader(
             notes = it.getString("notes"),
             isFavorite = it.getBoolean("isFavorite"),
             createdAt = it.getLong("createdAt"),
-            updatedAt = it.getLong("updatedAt")
+            updatedAt = it.getLong("updatedAt"),
+            category = it.optString("category", "login").ifBlank { "login" }.take(MAX_ID_LENGTH),
+            fields = parseFieldList(it)
         )
+    }
+
+    /** Custom fields of a note or login; absent in version 1 backups. */
+    private fun parseFieldList(item: JSONObject): List<CustomField> {
+        val array = item.optJSONArray("fields") ?: return emptyList()
+        if (array.length() > CustomFields.MAX_FIELDS) throw BackupException(BackupError.INVALID_CONTENT)
+        return CustomFields.decode(array.toString())
+    }
+
+    private fun parseTags(text: String): List<TagRecord> =
+        (JSONObject(text).optJSONArray("tags") ?: JSONArray()).objects().map {
+            TagRecord(it.getString("id"), it.getString("name"), it.optLong("createdAt", 0L))
+        }
+
+    private fun parseTagLinks(text: String): List<TagLinkRecord> =
+        (JSONObject(text).optJSONArray("links") ?: JSONArray()).objects().map {
+            TagLinkRecord(it.getString("tagId"), it.getString("itemType"), it.getString("itemId"))
+        }
+
+    private fun parseCategories(text: String): List<CategoryRecord> = JSONArray(text).objects().map {
+        CategoryRecord(
+            id = it.getString("id"),
+            name = it.getString("name"),
+            icon = it.optString("icon", "other"),
+            fieldsJson = it.optString("fieldsJson", "[]"),
+            createdAt = it.optLong("createdAt", 0L)
+        )
+    }
+
+    /**
+     * Links to an item or tag the backup does not contain carry nothing and are dropped (an item in
+     * the trash is not backed up, for example). Duplicates are dropped too.
+     */
+    private fun BackupContents.withoutDanglingTagLinks(): BackupContents {
+        val tagIds = tags.mapTo(HashSet()) { it.id }
+        val items = mapOf(
+            "NOTE" to notes.mapTo(HashSet()) { it.id },
+            "LOGIN" to credentials.mapTo(HashSet()) { it.id },
+            "FILE" to files.mapTo(HashSet()) { it.id }
+        )
+        val kept = tagLinks.filter { link -> link.tagId in tagIds && items[link.itemType]?.contains(link.itemId) == true }.distinct()
+        return if (kept.size == tagLinks.size) this else copy(tagLinks = kept)
     }
 
     private fun parseFiles(text: String): List<FileRecord> = JSONArray(text).objects().map {
@@ -477,6 +548,15 @@ class BackupArchiveReader(
         // Contents with no file record would be orphans.
         val fileIds = contents.files.mapTo(HashSet()) { it.id }
         filesDir.listFiles()?.forEach { if (it.name !in fileIds) fail() }
+
+        // Tags: unique ids, readable names, and never two tags that only differ in case or spacing.
+        checkIds(contents.tags.map { it.id })
+        val tagKeys = HashSet<String>()
+        contents.tags.forEach { tag ->
+            if (TagNames.clean(tag.name).isEmpty() || !tagKeys.add(TagNames.normalize(tag.name))) fail()
+        }
+        checkIds(contents.categories.map { it.id })
+        contents.categories.forEach { if (it.name.isBlank() || it.name.length > MAX_ID_LENGTH) fail() }
     }
 
     private companion object {
@@ -515,6 +595,7 @@ private fun notesJson(notes: List<NoteRecord>): String = JSONArray().also { arra
                 .put("isFavorite", it.isFavorite)
                 .put("isPinned", it.isPinned)
                 .put("colorIndex", it.colorIndex)
+                .put("fields", JSONArray(CustomFields.encode(it.fields)))
         )
     }
 }.toString()
@@ -533,6 +614,30 @@ private fun credentialsJson(credentials: List<CredentialRecord>): String = JSONA
                 .put("isFavorite", it.isFavorite)
                 .put("createdAt", it.createdAt)
                 .put("updatedAt", it.updatedAt)
+                .put("category", it.category)
+                .put("fields", JSONArray(CustomFields.encode(it.fields)))
+        )
+    }
+}.toString()
+
+private fun tagsJson(tags: List<TagRecord>, links: List<TagLinkRecord>): String = JSONObject()
+    .put("tags", JSONArray().also { array ->
+        tags.forEach { array.put(JSONObject().put("id", it.id).put("name", it.name).put("createdAt", it.createdAt)) }
+    })
+    .put("links", JSONArray().also { array ->
+        links.forEach { array.put(JSONObject().put("tagId", it.tagId).put("itemType", it.itemType).put("itemId", it.itemId)) }
+    })
+    .toString()
+
+private fun categoriesJson(categories: List<CategoryRecord>): String = JSONArray().also { array ->
+    categories.forEach {
+        array.put(
+            JSONObject()
+                .put("id", it.id)
+                .put("name", it.name)
+                .put("icon", it.icon)
+                .put("fieldsJson", it.fieldsJson)
+                .put("createdAt", it.createdAt)
         )
     }
 }.toString()

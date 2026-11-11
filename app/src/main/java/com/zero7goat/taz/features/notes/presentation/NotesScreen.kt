@@ -60,6 +60,9 @@ import com.zero7goat.taz.core.ui.SelectableRow
 import com.zero7goat.taz.core.ui.SelectionAction
 import com.zero7goat.taz.core.ui.TazFab
 import com.zero7goat.taz.core.ui.TazIcons
+import com.zero7goat.taz.features.tags.BulkTagSheet
+import com.zero7goat.taz.core.tags.TagTarget
+import com.zero7goat.taz.core.ui.TagChipLine
 import com.zero7goat.taz.core.ui.folderPathLabel
 import com.zero7goat.taz.core.ui.keepVisible
 import com.zero7goat.taz.core.ui.rememberSelection
@@ -87,6 +90,7 @@ fun NotesScreen(onOpenNote: (String) -> Unit, modifier: Modifier = Modifier) {
     var selection by rememberSelection()
     var moving by remember { mutableStateOf<Set<String>?>(null) }
     var trashing by remember { mutableStateOf<Set<String>?>(null) }
+    var tagging by remember { mutableStateOf<Set<String>?>(null) }
     var creatingFolder by remember { mutableStateOf(false) }
     var folderToRename by remember { mutableStateOf<FolderEntity?>(null) }
     var folderToDelete by remember { mutableStateOf<FolderEntity?>(null) }
@@ -133,7 +137,8 @@ fun NotesScreen(onOpenNote: (String) -> Unit, modifier: Modifier = Modifier) {
                         SelectionAction("Remove from favorites") { viewModel.setFavorite(selection, false) }
                     } else {
                         SelectionAction("Add to favorites") { viewModel.setFavorite(selection, true) }
-                    }
+                    },
+                    SelectionAction("Add tags") { tagging = selection }
                 )
             )
             Spacer(Modifier.height(12.dp))
@@ -263,6 +268,13 @@ fun NotesScreen(onOpenNote: (String) -> Unit, modifier: Modifier = Modifier) {
             onCreateFolder = viewModel::createFolderNow,
             onDismiss = { moving = null }
         )
+    }
+
+    tagging?.let { ids ->
+        BulkTagSheet(TagTarget.NOTE, ids) { added ->
+            tagging = null
+            if (added) selection = emptySet()
+        }
     }
 
     trashing?.let { ids ->
@@ -396,6 +408,7 @@ private fun NoteRow(
                     style = MaterialTheme.typography.bodySmall
                 )
             }
+            TagChipLine(state.tags[note.id].orEmpty(), modifier = Modifier.padding(top = 6.dp))
         }
         if (note.isPinned) RowStatusIcon(TazIcons.PinFilled, "Pinned")
         if (note.isFavorite) RowStatusIcon(TazIcons.StarFilled, "Favorite")
