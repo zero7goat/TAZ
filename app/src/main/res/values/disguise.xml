@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Names shown under the disguised home-screen icons. -->
+    <string name="disguise_calculator">Calculator</string>
+    <string name="disguise_notes">Notes</string>
+    <string name="disguise_weather">Weather</string>
+    <color name="disguise_calculator_bg">#FF37474F</color>
+    <color name="disguise_notes_bg">#FFFFC94A</color>
+    <color name="disguise_weather_bg">#FF3B8EEA</color>
+</resources>

@@ -19,7 +19,7 @@ interface CredentialDao {
 
     /** List data only: no password or note ciphertext is loaded. Alphabetical by name. */
     @Query(
-        "SELECT id, folderId, serviceName, websiteUrl, domain, usernameCipher, isFavorite, updatedAt, category, createdAt " +
+        "SELECT id, folderId, serviceName, websiteUrl, domain, usernameCipher, isFavorite, updatedAt, category, createdAt, isLocked " +
             "FROM credentials WHERE deletedAt IS NULL ORDER BY serviceName COLLATE NOCASE ASC"
     )
     fun observeListRows(): Flow<List<CredentialListRow>>
@@ -33,6 +33,12 @@ interface CredentialDao {
 
     @Query("UPDATE credentials SET folderId = :folderId WHERE id = :id")
     suspend fun setFolder(id: String, folderId: String?)
+
+    @Query("UPDATE credentials SET isLocked = :locked WHERE id = :id")
+    suspend fun setLocked(id: String, locked: Boolean)
+
+    @Query("UPDATE credentials SET historyCipher = NULL WHERE id = :id")
+    suspend fun clearHistory(id: String)
 
     // Trash. Moving to the trash only sets deletedAt; nothing is removed until the login is purged.
 

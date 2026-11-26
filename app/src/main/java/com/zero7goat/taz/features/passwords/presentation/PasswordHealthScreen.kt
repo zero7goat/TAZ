@@ -35,6 +35,7 @@ import com.zero7goat.taz.core.ui.ScreenHeader
 import com.zero7goat.taz.core.ui.TazIcons
 import com.zero7goat.taz.features.passwords.domain.HealthEntry
 import com.zero7goat.taz.features.passwords.domain.HealthReport
+import com.zero7goat.taz.features.passwords.domain.ReusedGroup
 import com.zero7goat.taz.features.passwords.domain.PasswordHealth
 
 /**
@@ -84,14 +85,20 @@ fun PasswordHealthScreen(
             is HealthState.Ready -> ReportContent(
                 report = current.report,
                 onOpenLogin = onOpenLogin,
-                modifier = Modifier.weight(1f)
+                modifier = Modifier.weight(1f),
+                onMerge = { group -> viewModel.merge(group) { } }
             )
         }
     }
 }
 
 @Composable
-private fun ReportContent(report: HealthReport, onOpenLogin: (String) -> Unit, modifier: Modifier = Modifier) {
+private fun ReportContent(
+    report: HealthReport,
+    onOpenLogin: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    onMerge: (ReusedGroup) -> Unit = {}
+) {
     if (report.checked == 0 && report.unreadable == 0) {
         Box(modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
             EmptyState(
@@ -134,6 +141,10 @@ private fun ReportContent(report: HealthReport, onOpenLogin: (String) -> Unit, m
             item { SectionHeader("Weak passwords", "Short, common or easy to guess", report.weak.size) }
             entryRows(report.weak, onOpenLogin)
         }
+        if (report.leaked.isNotEmpty()) {
+            item { SectionHeader("Commonly leaked", "Appear in published password leaks, or close variations of them", report.leaked.size) }
+            entryRows(report.leaked, onOpenLogin)
+        }
         if (report.reused.isNotEmpty()) {
             item { SectionHeader("Reused passwords", "The same password on more than one login", report.reusedLoginCount) }
             report.reused.forEach { group ->
@@ -144,6 +155,26 @@ private fun ReportContent(report: HealthReport, onOpenLogin: (String) -> Unit, m
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.labelMedium
                     )
+                }
+                entryRows(group.logins, onOpenLogin)
+            }
+        }
+        if (report.duplicates.isNotEmpty()) {
+            item { SectionHeader("Duplicate logins", "Same site and username saved more than once", report.duplicates.sumOf { it.logins.size }) }
+            report.duplicates.forEach { group ->
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(start = 20.dp, end = 12.dp, top = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${group.logins.size} copies",
+                            modifier = Modifier.weight(1f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                        androidx.compose.material3.TextButton(onClick = { onMerge(group) }) { Text("Merge") }
+                    }
                 }
                 entryRows(group.logins, onOpenLogin)
             }

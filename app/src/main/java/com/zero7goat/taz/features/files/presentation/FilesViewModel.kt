@@ -1,5 +1,7 @@
 package com.zero7goat.taz.features.files.presentation
 
+import com.zero7goat.taz.core.storage.FileAccess
+import com.zero7goat.taz.core.storage.VaultPaths
 import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
@@ -156,9 +158,13 @@ class FilesViewModel(
     // ---------- import ----------
 
     /** Copies the chosen documents into private storage, one after another, in the folder being browsed. */
-    fun importFiles(uris: List<Uri>) {
+    /** Moves a capture (photo, video, scan, recording) into the vault, then deletes the temporary file. */
+    fun importCaptured(file: java.io.File) = importFiles(listOf(Uri.fromFile(file)), cleanup = listOf(file))
+
+    fun importFiles(uris: List<Uri>, cleanup: List<java.io.File> = emptyList()) {
         if (uris.isEmpty()) return
         if (_importProgress.value != null) {
+            cleanup.forEach { it.delete() }
             _messages.tryEmit("An import is already running")
             return
         }
@@ -181,6 +187,7 @@ class FilesViewModel(
                 }
             } finally {
                 _importProgress.value = null
+                cleanup.forEach { it.delete() }
             }
             _messages.tryEmit(importSummary(imported, failed, lastFailure))
         }
@@ -210,6 +217,10 @@ class FilesViewModel(
 
     /** The stored copy if it exists and its recorded path is safe, otherwise null. */
     fun resolveBlob(file: FileEntity): File? = repository.resolveBlob(file)
+
+    fun setLocked(id: String, locked: Boolean) {
+        viewModelScope.launch { repository.setLocked(id, locked) }
+    }
 
     suspend fun prepareExternal(file: FileEntity): ExternalFile = repository.prepareExternal(file)
 
@@ -264,7 +275,8 @@ class FilesViewModel(
                     val database = TazDatabase.getInstance(appContext)
                     val repository = FileRepository(
                         dao = database.fileDao(),
-                        store = VaultFileStore(appContext.filesDir),
+                        store = VaultFileStore(VaultPaths.root(appContext)),
+                        cipher = FileAccess.cipher(),
                         appContext = appContext
                     )
                     return FilesViewModel(repository, FolderRepository(database.folderDao()), TagRepository(database.tagDao())) as T

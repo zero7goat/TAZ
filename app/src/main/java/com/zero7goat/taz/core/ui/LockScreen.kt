@@ -114,7 +114,8 @@ fun LockScreen(lock: AppLockManager, biometricEnabled: Boolean) {
             val result = lock.unlock(entered)
             busy = false
             when (result) {
-                UnlockResult.Success -> Unit // the gate swaps this screen for the app
+                UnlockResult.Success, UnlockResult.Decoy -> Unit // the gate swaps this screen for the app
+                UnlockResult.Wiped -> Unit // TAZ restarts empty
                 is UnlockResult.Wrong -> {
                     message = if (result.attemptsBeforeDelay > 0) {
                         "Incorrect passcode. ${result.attemptsBeforeDelay} more tries before a short wait."

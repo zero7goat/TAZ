@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.asStateFlow
 object AppShortcuts {
 
     const val ACTION_NEW_NOTE = "com.zero7goat.taz.action.NEW_NOTE"
+    const val ACTION_OPEN_CODES = "com.zero7goat.taz.action.OPEN_CODES"
     const val MAX_AGE_MS = 2 * 60 * 1000L
 
     // The time the shortcut was used (epoch ms), or 0 when there is no pending request.
@@ -25,6 +26,20 @@ object AppShortcuts {
 
     fun requestNewNote(now: Long = System.currentTimeMillis()) {
         _newNoteRequestedAt.value = now
+    }
+
+    // Same idea for the widget's "2FA codes" button.
+    private val _codesRequestedAt = MutableStateFlow(0L)
+    val codesRequestedAt: StateFlow<Long> = _codesRequestedAt.asStateFlow()
+
+    fun isOpenCodes(intent: Intent?): Boolean = intent?.action == ACTION_OPEN_CODES
+
+    fun requestCodes(now: Long = System.currentTimeMillis()) {
+        _codesRequestedAt.value = now
+    }
+
+    fun clearCodes() {
+        _codesRequestedAt.value = 0L
     }
 
     /** Called once the request has been shown (or when it is no longer wanted). */

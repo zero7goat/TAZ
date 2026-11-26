@@ -1,5 +1,6 @@
 package com.zero7goat.taz.features.notes.presentation
 
+import com.zero7goat.taz.core.storage.VaultPaths
 import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.ViewModel
@@ -30,6 +31,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -75,7 +77,11 @@ data class EditorUiState(
     /** Custom fields, decrypted. Only kept in memory. */
     val fields: List<CustomField> = emptyList(),
     /** False when stored fields exist but cannot be decrypted: they are then never overwritten. */
-    val fieldsReadable: Boolean = true
+    val fieldsReadable: Boolean = true,
+    /** Asks for the passcode again before the note opens. */
+    val isLocked: Boolean = false,
+    /** When the reminder notification is due (epoch ms), or null. */
+    val remindAt: Long? = null
 ) {
     val isBlank: Boolean
         get() = title.isBlank() && description.isBlank() && body.isBlank() &&
@@ -239,7 +245,9 @@ class NotesViewModel(
                         body = existing.body,
                         isFavorite = existing.isFavorite,
                         isPinned = existing.isPinned,
-                        colorIndex = existing.colorIndex
+                        colorIndex = existing.colorIndex,
+                        isLocked = existing.isLocked,
+                        remindAt = existing.remindAt
                     )
                 } else {
                     EditorUiState(
@@ -273,6 +281,56 @@ class NotesViewModel(
 
     fun onPinToggle() =
         updateEditor { it.copy(isPinned = !it.isPinned, isDirty = true) }
+
+    /** Turns the extra passcode check of the open note on or off (saving it first if new). */
+    fun setEditorLocked(locked: Boolean) {
+        viewModelScope.launch {
+            editorLock.withLock {
+                val id = _editor.value.noteId ?: return@withLock
+                persistLocked()
+                if (repository.getNote(id) == null) return@withLock
+                repository.setLocked(id, locked)
+                _editor.update { if (it.noteId == id) it.copy(isLocked = locked) else it }
+            }
+        }
+    }
+
+    /** Sets or clears the reminder of the open note (saving it first if new) and schedules it. */
+    fun setEditorReminder(remindAt: Long?) {
+        viewModelScope.launch {
+            editorLock.withLock {
+                val id = _editor.value.noteId ?: return@withLock
+                persistLocked()
+                if (repository.getNote(id) == null) return@withLock
+                repository.setReminder(id, remindAt)
+                _editor.update { if (it.noteId == id) it.copy(remindAt = remindAt) else it }
+            }
+            com.zero7goat.taz.core.reminders.Reminders.scheduleCheck(appContext)
+        }
+    }
+
+    /** Built-in templates first, then the user's own. */
+    val templates = repository.observeTemplates().map { custom ->
+        com.zero7goat.taz.features.notes.domain.NoteTemplates.builtIn + custom.map {
+            com.zero7goat.taz.features.notes.domain.NoteTemplate(it.id, it.name, it.title, it.body, builtIn = false)
+        }
+    }
+
+    fun saveAsTemplate(name: String, title: String, body: String) {
+        if (name.isBlank()) return
+        viewModelScope.launch { repository.saveTemplate(name, title, body) }
+    }
+
+    fun deleteTemplate(id: String) {
+        viewModelScope.launch { repository.deleteTemplate(id) }
+    }
+
+    /** Earlier versions of the open note, newest first. */
+    fun versions(noteId: String) = repository.observeVersions(noteId)
+
+    fun deleteVersion(id: String) {
+        viewModelScope.launch { repository.deleteVersion(id) }
+    }
 
     /** Saves the open note if it changed. Used when the app goes to the background. */
     fun saveDraft() {
@@ -349,9 +407,9 @@ class NotesViewModel(
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
                     val database = TazDatabase.getInstance(appContext)
-                    val images = NoteImageStore(appContext.filesDir)
+                    val images = NoteImageStore(VaultPaths.root(appContext))
                     return NotesViewModel(
-                        NoteRepository(database.noteDao(), images, cipher = KeystoreFieldCipher()),
+                        NoteRepository(database.noteDao(), images, cipher = KeystoreFieldCipher(), history = database.noteHistoryDao()),
                         FolderRepository(database.folderDao()),
                         appContext,
                         images,

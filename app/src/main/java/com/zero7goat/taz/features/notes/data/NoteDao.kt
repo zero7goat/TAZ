@@ -32,6 +32,16 @@ interface NoteDao {
     @Query("UPDATE notes SET isPinned = :isPinned WHERE id = :id")
     suspend fun setPinned(id: String, isPinned: Boolean)
 
+    @Query("UPDATE notes SET isLocked = :locked WHERE id = :id")
+    suspend fun setLocked(id: String, locked: Boolean)
+
+    @Query("UPDATE notes SET remindAt = :remindAt WHERE id = :id")
+    suspend fun setRemindAt(id: String, remindAt: Long?)
+
+    /** Notes outside the trash with a reminder at or before [until]. */
+    @Query("SELECT * FROM notes WHERE deletedAt IS NULL AND remindAt IS NOT NULL AND remindAt <= :until")
+    suspend fun remindersDue(until: Long): List<NoteEntity>
+
     @Query("UPDATE notes SET folderId = :folderId WHERE id = :id")
     suspend fun setFolder(id: String, folderId: String?)
 

@@ -1,5 +1,8 @@
 package com.zero7goat.taz.features.files.data
 
+import com.zero7goat.taz.core.storage.PhotoPrivacy
+import com.zero7goat.taz.core.storage.FileAccess
+import com.zero7goat.taz.core.storage.VaultFileCipher
 import android.content.ContentResolver
 import android.content.Context
 import android.net.Uri
@@ -50,7 +53,9 @@ class FileRepository(
     private val dao: FileDao,
     private val store: VaultFileStore,
     private val appContext: Context,
-    private val now: () -> Long = { System.currentTimeMillis() }
+    private val now: () -> Long = { System.currentTimeMillis() },
+    /** Encrypts new files and opens encrypted ones. Without it, files are stored as they are. */
+    private val cipher: VaultFileCipher? = null
 ) {
 
     // Serializes "move into the vault + insert row", deletion and orphan cleanup, so cleanup can
@@ -87,12 +92,26 @@ class FileRepository(
         try {
             val input = resolver.openInputStream(uri)
                 ?: return@withContext ImportResult.Failed(ImportFailure.CANNOT_READ)
-            val copied = input.use { copyStream(it, temp) }
+            val id = UUID.randomUUID().toString()
+            val copied = input.use { source ->
+                if (PhotoPrivacy.canStrip(mimeType)) {
+                    // Photos: copy, remove the location, then store (encrypted) from that copy.
+                    val plain = store.newTempFile()
+                    try {
+                        copyStream(source, plain)
+                        PhotoPrivacy.stripLocation(plain)
+                        plain.inputStream().use { if (cipher != null) encryptStream(it, temp, id, cipher) else copyStream(it, temp) }
+                    } finally {
+                        store.discardTemp(plain)
+                    }
+                } else {
+                    if (cipher != null) encryptStream(source, temp, id, cipher) else copyStream(source, temp)
+                }
+            }
             if (copied == 0L && (reportedSize ?: 0L) > 0L) {
                 return@withContext ImportResult.Failed(ImportFailure.CANNOT_READ)
             }
 
-            val id = UUID.randomUUID().toString()
             storageLock.withLock {
                 val relativePath = store.commit(temp, id)
                 try {
@@ -196,7 +215,17 @@ class FileRepository(
     }
 
     /** The stored copy of [file] if its recorded path is safe and the file exists, otherwise null. */
-    fun resolveBlob(file: FileEntity): File? = store.resolve(file.storedPath)?.takeIf { it.isFile }
+    suspend fun setLocked(id: String, locked: Boolean) = dao.setLocked(id, locked)
+
+    fun resolveBlob(file: FileEntity): File? {
+        val raw = store.resolve(file.storedPath)?.takeIf { it.isFile } ?: return null
+        val c = cipher ?: return raw
+        return try {
+            FileAccess.readable(appContext, raw, file.id, c)
+        } catch (e: Exception) {
+            null // shown as "missing or damaged"; never a garbled plain read
+        }
+    }
 
     /** Prepares [file] for sharing or opening in another app. Runs on a background thread. */
     suspend fun prepareExternal(file: FileEntity): ExternalFile = withContext(Dispatchers.IO) {
@@ -264,6 +293,14 @@ class FileRepository(
     }
 
     /** Streams [input] into [target] in small chunks. Stops promptly if the coroutine is cancelled. */
+    private fun encryptStream(input: InputStream, target: File, id: String, cipher: VaultFileCipher): Long =
+        java.io.FileOutputStream(target).use { output ->
+            val total = cipher.encrypt(input, output, id)
+            output.flush()
+            output.fd.sync()
+            total
+        }
+
     private suspend fun copyStream(input: InputStream, target: File): Long {
         var total = 0L
         java.io.FileOutputStream(target).use { output ->

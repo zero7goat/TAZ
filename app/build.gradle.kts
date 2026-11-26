@@ -17,8 +17,8 @@ android {
         applicationId = "com.zero7goat.taz"
         minSdk = 26
         targetSdk = 37
-        versionCode = 3
-        versionName = "1.2"
+        versionCode = 4
+        versionName = "2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -86,6 +86,20 @@ dependencies {
     implementation(libs.androidx.datastore.preferences)
     // Writes the user-initiated .xlsx export (pure Java, streams rows, no network access).
     implementation(libs.fastexcel)
+    // Two-factor QR codes are read on the device: CameraX shows the camera, ZXing decodes the code.
+    // Neither needs network access.
+    implementation(libs.androidx.camera.core)
+    implementation(libs.androidx.camera.camera2)
+    implementation(libs.androidx.camera.lifecycle)
+    implementation(libs.androidx.camera.view)
+    implementation(libs.androidx.camera.video)
+    implementation(libs.zxing.core)
+    // Autofill suggestions shown in the keyboard strip (Android 11+).
+    implementation(libs.androidx.autofill)
+    // Scheduled automatic backups and reminders, run on the device (no network).
+    implementation(libs.androidx.work.runtime)
+    // Passkeys: TAZ as an Android 14+ credential provider. Keys are made and used on the device.
+    implementation(libs.androidx.credentials)
     testImplementation(libs.junit)
     // Android's org.json is only a stub in local unit tests; the backup format code uses it.
     testImplementation(libs.org.json)

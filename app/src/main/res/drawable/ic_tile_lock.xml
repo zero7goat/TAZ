@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Quick-settings tile icon (a padlock). The system tints it. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M12,2.5a4.5,4.5 0,0 0,-4.5 4.5v3H6.5A1.5,1.5 0,0 0,5 11.5v8A1.5,1.5 0,0 0,6.5 21h11a1.5,1.5 0,0 0,1.5 -1.5v-8A1.5,1.5 0,0 0,17.5 10H16.5V7A4.5,4.5 0,0 0,12 2.5zM9.5,7a2.5,2.5 0,0 1,5 0v3h-5zM12,13.5a1.5,1.5 0,0 1,0.75 2.8V18h-1.5v-1.7A1.5,1.5 0,0 1,12 13.5z" />
+</vector>

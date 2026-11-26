@@ -483,7 +483,7 @@ private fun CredentialRow(
                 style = MaterialTheme.typography.titleMedium
             )
             val secondary = listOfNotNull(
-                item.username.ifEmpty { null } ?: category.name.takeIf { category.key != Categories.LOGIN.key },
+                if (item.isLocked) "🔒 Locked" else item.username.ifEmpty { null } ?: category.name.takeIf { category.key != Categories.LOGIN.key },
                 location
             ).joinToString("  ·  ")
             if (secondary.isNotEmpty()) {

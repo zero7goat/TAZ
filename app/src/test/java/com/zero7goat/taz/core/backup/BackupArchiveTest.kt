@@ -347,7 +347,7 @@ class BackupArchiveTest {
     @Test
     fun unsupportedContentVersionIsRejected() {
         assertFails(BackupError.UNSUPPORTED_VERSION) {
-            readZip(zip("manifest.json" to manifest(version = 3).toByteArray(), *emptyData()))
+            readZip(zip("manifest.json" to manifest(version = BackupPaths.CONTENT_VERSION + 1).toByteArray(), *emptyData()))
         }
     }
 

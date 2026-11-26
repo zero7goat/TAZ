@@ -243,9 +243,11 @@ fun TurnOffLockDialog(
     )
 }
 
-private fun UnlockResult.failureText(): String = when (this) {
+internal fun UnlockResult.failureText(): String = when (this) {
     UnlockResult.Success -> ""
     is UnlockResult.Wrong -> "That passcode is incorrect."
     is UnlockResult.LockedOut -> "Too many attempts. Try again in ${formatCountdown(remainingMillis)}."
     UnlockResult.Unreadable -> "The saved passcode can't be checked on this device."
+    UnlockResult.Decoy -> "That passcode is incorrect."
+    UnlockResult.Wiped -> "Too many wrong passcodes. TAZ was erased."
 }

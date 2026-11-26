@@ -25,6 +25,12 @@ sealed interface UnlockResult {
 
     /** The stored passcode cannot be verified on this device. */
     data object Unreadable : UnlockResult
+
+    /** The duress passcode: unlocks into the empty decoy vault. */
+    data object Decoy : UnlockResult
+
+    /** Too many wrong passcodes with "erase after" turned on: everything was erased. */
+    data object Wiped : UnlockResult
 }
 
 /**
@@ -39,7 +45,11 @@ class AppLockManager(
     settings: SettingsRepository,
     private val scope: CoroutineScope,
     private val monotonicClock: () -> Long = { SystemClock.elapsedRealtime() },
-    private val wallClock: () -> Long = { System.currentTimeMillis() }
+    private val wallClock: () -> Long = { System.currentTimeMillis() },
+    /** How many wrong passcodes in a row erase everything; 0 = never. */
+    private val wipeAfterAttempts: suspend () -> Int = { 0 },
+    /** Erases all TAZ data (see AppReset). */
+    private val onWipe: suspend () -> Unit = {}
 ) {
 
     private val _state = MutableStateFlow(LockState.Loading)
@@ -102,22 +112,78 @@ class AppLockManager(
     }
 
     fun lockNow() {
-        if (hasPasscode.value) _state.value = LockState.Locked
+        if (hasPasscode.value) {
+            _state.value = LockState.Locked
+            _unlockedItems.value = emptySet()
+        }
     }
 
     private fun isUnlockedWithLock() = _state.value == LockState.Unlocked && hasPasscode.value
+
+    /**
+     * For the autofill service, which runs while TAZ itself is in the background: applies the
+     * auto-lock rule as if the user had just returned (locking if TAZ has been away too long) and
+     * says whether logins may be filled without asking for the passcode. Still loading counts as
+     * locked, so a freshly started process never fills before the lock state is known.
+     */
+    fun isUnlockedForAutofill(): Boolean {
+        if (_state.value != LockState.Unlocked) return false
+        if (!hasPasscode.value) return true
+        val away = backgroundedAt?.let { monotonicClock() - it }
+        if (away != null && LockPolicy.shouldLockOnReturn(timeout, away)) {
+            lockNow()
+            return false
+        }
+        return true
+    }
+
+    // ---------- items with their own lock ----------
+
+    private val _unlockedItems = MutableStateFlow<Set<String>>(emptySet())
+
+    /** Items (keys like "LOGIN:id") opened with the passcode since TAZ last locked. */
+    val unlockedItems: StateFlow<Set<String>> = _unlockedItems.asStateFlow()
+
+    fun markItemUnlocked(key: String) {
+        _unlockedItems.value = _unlockedItems.value + key
+    }
 
     // ---------- unlocking ----------
 
     /** Called after a successful biometric prompt. Only valid while a passcode exists. */
     fun unlockWithBiometric() {
-        if (hasPasscode.value) markUnlocked()
+        if (hasPasscode.value) {
+            VaultMode.enter(decoy = false)
+            markUnlocked()
+        }
     }
 
+    /**
+     * Unlocks with [passcode]. [UnlockResult.Success] opens the real vault and
+     * [UnlockResult.Decoy] (the duress passcode) the decoy vault; the caller switches vaults.
+     */
     suspend fun unlock(passcode: CharArray): UnlockResult {
         val result = verify(passcode)
-        if (result == UnlockResult.Success) markUnlocked()
+        if (result == UnlockResult.Success || result == UnlockResult.Decoy) {
+            // Switch vaults before anything is shown, so no frame of the other vault appears.
+            VaultMode.enter(decoy = result == UnlockResult.Decoy)
+            markUnlocked()
+        }
         return result
+    }
+
+    /**
+     * Checks the passcode for a sensitive action inside the app (opening a locked item, exporting).
+     * In the decoy vault the duress passcode is the one that works, so nothing gives the decoy away.
+     */
+    suspend fun verifyForAction(passcode: CharArray): UnlockResult {
+        val result = verify(passcode)
+        return when {
+            result == UnlockResult.Success && !VaultMode.isDecoy -> UnlockResult.Success
+            result == UnlockResult.Decoy && VaultMode.isDecoy -> UnlockResult.Success
+            result == UnlockResult.Success || result == UnlockResult.Decoy -> UnlockResult.Wrong(LockoutPolicy.FREE_ATTEMPTS)
+            else -> result
+        }
     }
 
     /** The wall-clock time until which attempts are refused, or 0. */
@@ -128,7 +194,11 @@ class AppLockManager(
         _state.value = LockState.Unlocked
     }
 
-    /** Checks a passcode, counting failures and enforcing delays. Does not change the lock state. */
+    /**
+     * Checks a passcode, counting failures and enforcing delays. Does not change the lock state.
+     * Returns [UnlockResult.Decoy] for the duress passcode, and [UnlockResult.Wiped] once "erase
+     * after N wrong passcodes" is on and that many wrong ones were entered in a row.
+     */
     suspend fun verify(passcode: CharArray): UnlockResult = withContext(Dispatchers.Default) {
         mutex.withLock {
             try {
@@ -144,8 +214,16 @@ class AppLockManager(
                         if (PasscodeHasher.matches(passcode, loaded.salt, loaded.iterations, loaded.hash)) {
                             store.writeFailures(0, 0L)
                             UnlockResult.Success
+                        } else if (matchesDuress(passcode)) {
+                            store.writeFailures(0, 0L)
+                            UnlockResult.Decoy
                         } else {
                             val count = failures.count + 1
+                            val wipeAt = wipeAfterAttempts()
+                            if (wipeAt > 0 && count >= wipeAt) {
+                                onWipe()
+                                return@withLock UnlockResult.Wiped
+                            }
                             val delay = LockoutPolicy.delayMillis(count)
                             store.writeFailures(count, if (delay > 0) now + delay else 0L)
                             if (delay > 0) {
@@ -161,6 +239,51 @@ class AppLockManager(
             }
         }
     }
+
+    private suspend fun matchesDuress(passcode: CharArray): Boolean {
+        val duress = store.loadDuress() as? PasscodeStore.Loaded.Present ?: return false
+        return PasscodeHasher.matches(passcode, duress.salt, duress.iterations, duress.hash)
+    }
+
+    // ---------- duress passcode ----------
+
+    val hasDuress: StateFlow<Boolean> = store.hasDuress.stateIn(scope, SharingStarted.Eagerly, false)
+
+    /**
+     * Sets the duress passcode after checking the real one. It must be a valid passcode and differ
+     * from the real one. Returns the result of checking [current] (Wrong if [duress] is not usable).
+     */
+    suspend fun setDuress(current: CharArray, duress: CharArray): UnlockResult {
+        if (!PasscodeRules.isValid(duress)) {
+            current.fill('\u0000')
+            duress.fill('\u0000')
+            return UnlockResult.Wrong(LockoutPolicy.FREE_ATTEMPTS)
+        }
+        val copy = duress.copyOf()
+        duress.fill('\u0000')
+        val result = verify(current)
+        try {
+            if (result != UnlockResult.Success) return result
+            val real = store.load() as? PasscodeStore.Loaded.Present ?: return UnlockResult.Unreadable
+            if (PasscodeHasher.matches(copy.copyOf(), real.salt, real.iterations, real.hash)) {
+                return UnlockResult.Wrong(LockoutPolicy.FREE_ATTEMPTS)
+            }
+            withContext(Dispatchers.Default) {
+                val salt = PasscodeHasher.newSalt()
+                val hash = PasscodeHasher.hash(copy.copyOf(), salt, PasscodeHasher.DEFAULT_ITERATIONS)
+                try {
+                    store.saveDuress(salt, PasscodeHasher.DEFAULT_ITERATIONS, hash)
+                } finally {
+                    hash.fill(0)
+                }
+            }
+            return UnlockResult.Success
+        } finally {
+            copy.fill('\u0000')
+        }
+    }
+
+    suspend fun removeDuress() = store.clearDuress()
 
     // ---------- managing the passcode ----------
 

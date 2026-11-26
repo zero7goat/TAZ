@@ -22,6 +22,10 @@ import com.zero7goat.taz.core.navigation.AppNavigation
 import com.zero7goat.taz.core.security.AppLockManager
 import com.zero7goat.taz.core.settings.AppSettings
 import com.zero7goat.taz.core.settings.SettingsRepository
+import com.zero7goat.taz.core.settings.FeaturePrefs
+import com.zero7goat.taz.core.settings.FeatureSettings
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.remember
 import com.zero7goat.taz.features.passwords.presentation.PasswordsViewModel
 import com.zero7goat.taz.ui.theme.TAZTheme
 import com.zero7goat.taz.ui.theme.isDark
@@ -51,11 +55,11 @@ private fun TazAppContent(settings: AppSettings, lock: AppLockManager) {
 
     val baseDensity = LocalDensity.current
     val scaledDensity = Density(baseDensity.density, baseDensity.fontScale * settings.fontSize.scale)
-    val passwordsViewModel: PasswordsViewModel =
-        viewModel(factory = PasswordsViewModel.factory(LocalContext.current.applicationContext))
+    val appContext = LocalContext.current.applicationContext
+    val features by remember(appContext) { FeaturePrefs(appContext).settings }.collectAsStateWithLifecycle(FeatureSettings())
 
     CompositionLocalProvider(LocalDensity provides scaledDensity) {
-        TAZTheme(themeMode = settings.themeMode, fontFamily = AppFonts.familyFor(settings.fontKey)) {
+        TAZTheme(themeMode = settings.themeMode, fontFamily = AppFonts.familyFor(settings.fontKey), dynamicColor = features.dynamicColor) {
             // The root Surface gives everything below it, the lock screen included, the theme's
             // background and content colour, so no icon can end up black on a dark background.
             Surface(
@@ -63,14 +67,19 @@ private fun TazAppContent(settings: AppSettings, lock: AppLockManager) {
                 color = MaterialTheme.colorScheme.background,
                 contentColor = MaterialTheme.colorScheme.onBackground
             ) {
-                AppLockGate(
-                    lock = lock,
-                    biometricEnabled = settings.biometricEnabled,
-                    // Locking drops a decrypted login that is only being viewed. A login with unsaved
-                    // typing is kept (hidden behind the lock screen) so nothing typed is lost.
-                    onLocked = { passwordsViewModel.onAppLocked() }
-                ) {
-                    AppNavigation()
+                VaultScope {
+                    // Inside the vault scope: a switch to or from the decoy vault starts it afresh.
+                    val passwordsViewModel: PasswordsViewModel =
+                        viewModel(factory = PasswordsViewModel.factory(LocalContext.current.applicationContext))
+                    AppLockGate(
+                        lock = lock,
+                        biometricEnabled = settings.biometricEnabled,
+                        // Locking drops a decrypted login that is only being viewed. A login with unsaved
+                        // typing is kept (hidden behind the lock screen) so nothing typed is lost.
+                        onLocked = { passwordsViewModel.onAppLocked() }
+                    ) {
+                        AppNavigation()
+                    }
                 }
             }
         }

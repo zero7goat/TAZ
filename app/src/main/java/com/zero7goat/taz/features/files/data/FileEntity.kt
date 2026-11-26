@@ -1,5 +1,6 @@
 package com.zero7goat.taz.features.files.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -41,7 +42,13 @@ data class FileEntity(
     val createdAt: Long,
     val updatedAt: Long,
     /** When the file was moved to the trash (epoch ms), or null if it is not in the trash. */
-    val deletedAt: Long? = null
+    val deletedAt: Long? = null,
+    /** Asks for the passcode again before the file opens, even while TAZ is unlocked. */
+    @ColumnInfo(defaultValue = "0")
+    val isLocked: Boolean = false,
+    /** How the stored copy is kept: 0 = plain (before 2.0), 1 = encrypted (see VaultFileCipher). */
+    @ColumnInfo(defaultValue = "0")
+    val encryption: Int = 0
 )
 
 /** Just enough to pick a free name inside a folder. */

@@ -360,7 +360,7 @@ private fun NoteRow(
     val query = state.query
     // While searching, a snippet shows where the text matched.
     val snippet = remember(note.description, note.body, query) {
-        NoteSearch.snippet(note.description, note.body, query)
+        if (note.isLocked) "Locked note" else NoteSearch.snippet(note.description, note.body, query)
     }
     SelectableRow(
         selected = selected,

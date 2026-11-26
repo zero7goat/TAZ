@@ -15,6 +15,11 @@ import com.zero7goat.taz.core.database.TazDatabase
 import com.zero7goat.taz.core.tags.TagRepository
 import com.zero7goat.taz.core.security.AppLockManager
 import com.zero7goat.taz.core.security.SecureWindow
+import com.zero7goat.taz.core.security.LockState
+import com.zero7goat.taz.core.storage.FileAccess
+import com.zero7goat.taz.core.storage.VaultFileMigrator
+import com.zero7goat.taz.core.settings.FeaturePrefs
+import com.zero7goat.taz.core.reminders.Reminders
 import com.zero7goat.taz.core.ui.TazApp
 import com.zero7goat.taz.features.trash.data.TrashRepository
 import kotlinx.coroutines.delay
@@ -27,7 +32,7 @@ import kotlinx.coroutines.launch
  * the app lock the events it needs: touches, leaving and returning to the app, and a once-a-second
  * check for inactivity while the app is open.
  */
-class MainActivity : FragmentActivity() {
+class TazActivity : FragmentActivity() {
 
     private lateinit var lockManager: AppLockManager
 
@@ -62,10 +67,31 @@ class MainActivity : FragmentActivity() {
             } catch (e: Exception) {
                 // Left for the next start; the restore journal stays in place.
             }
+            // Decrypted viewing copies never outlive a session.
+            FileAccess.clearViewCache(applicationContext)
+            // Files stored before 2.0 (or just restored) are encrypted in the background, one at a time.
+            try {
+                if (VaultFileMigrator.run(applicationContext) == 0) FeaturePrefs(applicationContext).setFilesEncrypted()
+            } catch (e: Exception) {
+                // Tried again next start; every file stays readable meanwhile.
+            }
+        }
+
+        // Reminders and the daily check run on the phone; make sure they are scheduled.
+        try {
+            Reminders.scheduleCheck(applicationContext)
+        } catch (e: Exception) {
+            // WorkManager unavailable this time; tried again next start.
+        }
+
+        // Locking wipes decrypted viewing copies of files.
+        lifecycleScope.launch {
+            lockManager.state.collect { if (it == LockState.Locked) FileAccess.clearViewCache(applicationContext) }
         }
 
         // The home-screen "New note" shortcut. Only on a fresh start: a rotation must not repeat it.
         if (savedInstanceState == null && AppShortcuts.isNewNote(intent)) AppShortcuts.requestNewNote()
+        if (savedInstanceState == null && AppShortcuts.isOpenCodes(intent)) AppShortcuts.requestCodes()
 
         // Removes notes, logins and files that have been in the trash for more than 30 days.
         lifecycleScope.launch {
@@ -90,6 +116,7 @@ class MainActivity : FragmentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         if (AppShortcuts.isNewNote(intent)) AppShortcuts.requestNewNote()
+        if (AppShortcuts.isOpenCodes(intent)) AppShortcuts.requestCodes()
     }
 
     override fun onUserInteraction() {

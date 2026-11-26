@@ -20,6 +20,10 @@ import com.zero7goat.taz.core.settings.ClipboardClearTimeout
 import com.zero7goat.taz.core.settings.FontSize
 import com.zero7goat.taz.core.settings.SettingsRepository
 import com.zero7goat.taz.core.settings.ThemeMode
+import com.zero7goat.taz.core.totp.MigratedAccount
+import com.zero7goat.taz.core.transfer.ImportPreview
+import com.zero7goat.taz.core.transfer.LoginTransferService
+import com.zero7goat.taz.core.transfer.TransferException
 import java.util.concurrent.CancellationException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -33,7 +37,8 @@ class SettingsViewModel(
     private val repository: SettingsRepository,
     val lock: AppLockManager,
     private val backups: BackupService,
-    private val exports: SpreadsheetExportService
+    private val exports: SpreadsheetExportService,
+    private val transfers: LoginTransferService
 ) : ViewModel() {
 
     val settings: StateFlow<AppSettings> =
@@ -166,8 +171,82 @@ class SettingsViewModel(
             val summary = exports.export(uri)
             TransferState.Finished(
                 "Spreadsheet exported",
-                "Exported  notes,  files and  logins (names and websites only). " +
-                    "The file is not encrypted."
+                "Exported ${summary.notes} notes, ${summary.files} files and ${summary.logins} logins " +
+                    "(names and websites only). The file is not encrypted."
+            )
+        }
+    }
+
+    // ---------- importing and exporting logins ----------
+
+    private val _importPreview = MutableStateFlow<ImportPreview?>(null)
+
+    /** What the picked import file holds, waiting for the user to confirm. Memory only. */
+    val importPreview: StateFlow<ImportPreview?> = _importPreview.asStateFlow()
+
+    fun previewImport(uri: Uri) {
+        _importPreview.value = null
+        run(working = "Reading file...") {
+            _importPreview.value = transfers.preview(uri)
+            TransferState.Idle
+        }
+    }
+
+    fun confirmImport() {
+        val preview = _importPreview.value ?: return
+        _importPreview.value = null
+        run(working = "Importing logins...") {
+            val summary = transfers.import(preview)
+            TransferState.Finished(
+                "Import complete",
+                buildString {
+                    append("Added ${summary.imported} ${if (summary.imported == 1) "login" else "logins"}")
+                    if (summary.folders > 0) append(" and ${summary.folders} ${if (summary.folders == 1) "folder" else "folders"}")
+                    append(".")
+                    if (summary.duplicates > 0) append(" ${summary.duplicates} already in TAZ were skipped.")
+                    append("\n\nNow delete the export file you picked: it holds your passwords without encryption.")
+                }
+            )
+        }
+    }
+
+    fun importAuthenticator(accounts: List<MigratedAccount>) {
+        if (accounts.isEmpty()) return
+        run(working = "Adding two-factor accounts...") {
+            val summary = transfers.importAuthenticator(accounts)
+            TransferState.Finished(
+                "Two-factor accounts imported",
+                buildString {
+                    if (summary.attached > 0) append("Added codes to ${summary.attached} existing ${if (summary.attached == 1) "login" else "logins"}. ")
+                    if (summary.created > 0) append("Created ${summary.created} new ${if (summary.created == 1) "entry" else "entries"}. ")
+                    if (summary.skipped > 0) append("${summary.skipped} were already in TAZ. ")
+                    append("Check a few codes before removing them from Google Authenticator.")
+                }
+            )
+        }
+    }
+
+    fun receiveShared(login: com.zero7goat.taz.core.transfer.SharedLogin) {
+        run(working = "Adding login...") {
+            transfers.saveShared(login)
+            TransferState.Finished("Login added", "\"${login.name.ifBlank { "Shared login" }}\" is now in Passwords.")
+        }
+    }
+
+    fun cancelImport() {
+        _importPreview.value = null
+    }
+
+    fun startCsvExport(uri: Uri) {
+        run(working = "Writing CSV...") {
+            val summary = transfers.exportCsv(uri)
+            TransferState.Finished(
+                "Logins exported",
+                buildString {
+                    append("Exported ${summary.logins} ${if (summary.logins == 1) "login" else "logins"}. ")
+                    if (summary.unreadable > 0) append("${summary.unreadable} couldn't be decrypted on this device and were left out. ")
+                    append("The file is not encrypted: delete it as soon as you've imported it.")
+                }
             )
         }
     }
@@ -190,6 +269,8 @@ class SettingsViewModel(
                 block()
             } catch (e: CancellationException) {
                 throw e
+            } catch (e: TransferException) {
+                TransferState.Failed("Couldn't finish", e.userMessage)
             } catch (e: BackupException) {
                 TransferState.Failed(failureTitle(e.error), failureMessage(e.error))
             } catch (e: Exception) {
@@ -209,7 +290,8 @@ class SettingsViewModel(
                         AppContainer.settings(appContext),
                         AppContainer.lockManager(appContext),
                         BackupService.create(appContext),
-                        SpreadsheetExportService(appContext, TazDatabase.getInstance(appContext))
+                        SpreadsheetExportService(appContext, TazDatabase.getInstance(appContext)),
+                        LoginTransferService.create(appContext)
                     ) as T
             }
         }

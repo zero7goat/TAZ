@@ -1,5 +1,6 @@
 package com.zero7goat.taz.core.fields
 
+import com.zero7goat.taz.core.totp.Totp
 import java.time.LocalDate
 import java.time.format.DateTimeParseException
 import org.json.JSONArray
@@ -19,7 +20,9 @@ enum class FieldType(val key: String, val label: String) {
     EMAIL("email", "Email"),
     PHONE("phone", "Phone"),
     SECRET("secret", "Password / secret"),
-    TOGGLE("toggle", "Yes / no");
+    TOGGLE("toggle", "Yes / no"),
+    /** A two-factor setup key or otpauth link. Shown as the live 6-digit code; always hidden. */
+    TOTP("totp", "Two-factor code");
 
     companion object {
         fun fromKey(key: String?): FieldType = entries.firstOrNull { it.key == key } ?: TEXT
@@ -28,7 +31,7 @@ enum class FieldType(val key: String, val label: String) {
 
 /**
  * One user-defined field of a note or login. [hidden] marks a value as sensitive: it is masked
- * until revealed and is never searched or shown in previews. A [FieldType.SECRET] is always hidden.
+ * until revealed and is never searched or shown in previews. A [FieldType.SECRET] or [FieldType.TOTP] is always hidden.
  * [value] is plain text in memory only; on disk it exists solely inside an encrypted blob.
  */
 class CustomField(
@@ -38,7 +41,7 @@ class CustomField(
     val value: String,
     hidden: Boolean = false
 ) {
-    val isHidden: Boolean = hidden || type == FieldType.SECRET
+    val isHidden: Boolean = hidden || type == FieldType.SECRET || type == FieldType.TOTP
 
     fun copy(
         label: String = this.label,
@@ -71,6 +74,7 @@ object CustomFields {
             FieldType.NUMBER -> value.trim().let { it.isNotEmpty() && NUMBER.matches(it) }
             FieldType.TOGGLE -> value == TRUE || value == FALSE
             FieldType.DATE -> parseDate(value) != null
+            FieldType.TOTP -> Totp.isValid(value)
             else -> true
         }
     }

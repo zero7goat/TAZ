@@ -9,7 +9,12 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import com.zero7goat.taz.core.AppContainer
+import com.zero7goat.taz.core.transfer.SharedLogin
+import com.zero7goat.taz.core.transfer.ShareLoginQrDialog
 import com.zero7goat.taz.core.fields.CustomField
+import com.zero7goat.taz.core.ui.ItemLockGate
+import com.zero7goat.taz.core.ui.itemLockKey
 import com.zero7goat.taz.core.tags.TagTarget
 import com.zero7goat.taz.core.ui.CustomFieldsEditor
 import com.zero7goat.taz.core.ui.CustomFieldsView
@@ -167,6 +172,12 @@ private fun EditorContent(
     var revealedFields by remember { mutableStateOf(emptySet<String>()) }
     // What the generator fills: PASSWORD_TARGET for the main password, otherwise a field id.
     var generatorTarget by remember { mutableStateOf<String?>(null) }
+    var suggestingUsername by remember { mutableStateOf(false) }
+    var sharingQr by remember { mutableStateOf(false) }
+    val appLockOn by AppContainer.lockManager(context).hasPasscode.collectAsStateWithLifecycle()
+    val openedItems by AppContainer.lockManager(context).unlockedItems.collectAsStateWithLifecycle()
+    // A login with its own lock that has not been opened yet: nothing can be shown or edited.
+    val gated = editor.saved?.let { it.isLocked && appLockOn && itemLockKey("LOGIN", it.id) !in openedItems } == true
     var pickingCategory by remember { mutableStateOf(false) }
     var pickingTags by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -230,11 +241,18 @@ private fun EditorContent(
                 onBack = { requestClose() },
                 onToggleFavorite = viewModel::toggleEditorFavorite,
                 onEdit = viewModel::startEditing,
+                canEdit = !gated,
                 onSave = {
                     focusManager.clearFocus()
                     viewModel.save()
                 },
-                onDelete = { confirmDelete = true }
+                onDelete = { confirmDelete = true },
+                isLocked = editor.saved?.isLocked?.takeIf { appLockOn },
+                onToggleLock = {
+                    val now = editor.saved?.isLocked != true
+                    viewModel.setEditorLocked(now)
+                    showMessage(if (now) "TAZ will ask for your passcode before opening this login" else "Extra lock removed")
+                }
             )
             Column(
                 modifier = Modifier
@@ -270,35 +288,44 @@ private fun EditorContent(
                                 onToggleFieldReveal = { id ->
                                     revealedFields = if (id in revealedFields) revealedFields - id else revealedFields + id
                                 },
-                                onGenerateField = { id -> generatorTarget = id }
+                                onGenerateField = { id -> generatorTarget = id },
+                                onGenerateUsername = { suggestingUsername = true }
                             )
                         } else {
-                            ViewBody(
-                                detail = saved,
-                                category = Categories.resolve(saved.category, categories),
-                                reveal = reveal,
-                                onToggleReveal = { reveal = !reveal },
-                                onCopyUsername = {
-                                    ClipboardGuard.copySensitive(context, saved.username)
-                                    showMessage("Username copied")
-                                },
-                                onCopyPassword = {
-                                    ClipboardGuard.copySensitive(context, saved.password)
-                                    showMessage("Password copied. It will be cleared from the clipboard shortly.")
-                                },
-                                onOpenWebsite = openUrl,
-                                revealedFields = revealedFields,
-                                onToggleFieldReveal = { id ->
-                                    revealedFields = if (id in revealedFields) revealedFields - id else revealedFields + id
-                                },
-                                onCopyField = { field ->
-                                    ClipboardGuard.copySensitive(context, field.value)
-                                    showMessage(
-                                        if (field.isHidden) "${field.label.ifBlank { "Value" }} copied. It will be cleared shortly."
-                                        else "${field.label.ifBlank { "Value" }} copied"
-                                    )
-                                }
-                            )
+                            ItemLockGate(locked = saved.isLocked, itemKey = itemLockKey("LOGIN", saved.id), title = saved.serviceName) {
+                                ViewBody(
+                                    detail = saved,
+                                    category = Categories.resolve(saved.category, categories),
+                                    reveal = reveal,
+                                    onToggleReveal = { reveal = !reveal },
+                                    onCopyUsername = {
+                                        ClipboardGuard.copySensitive(context, saved.username)
+                                        showMessage("Username copied")
+                                    },
+                                    onCopyPassword = {
+                                        ClipboardGuard.copySensitive(context, saved.password)
+                                        showMessage("Password copied. It will be cleared from the clipboard shortly.")
+                                    },
+                                    onOpenWebsite = openUrl,
+                                    revealedFields = revealedFields,
+                                    onToggleFieldReveal = { id ->
+                                        revealedFields = if (id in revealedFields) revealedFields - id else revealedFields + id
+                                    },
+                                    onCopyField = { field ->
+                                        ClipboardGuard.copySensitive(context, field.value)
+                                        showMessage(
+                                            if (field.isHidden) "${field.label.ifBlank { "Value" }} copied. It will be cleared shortly."
+                                            else "${field.label.ifBlank { "Value" }} copied"
+                                        )
+                                    },
+                                    onCopyOldPassword = { old ->
+                                        ClipboardGuard.copySensitive(context, old)
+                                        showMessage("Old password copied. It will be cleared shortly.")
+                                    },
+                                    onClearHistory = { viewModel.clearEditorHistory() },
+                                    onShareQr = { sharingQr = true }
+                                )
+                            }
                         }
                         TagsSection(
                             tags = itemTags,
@@ -339,6 +366,25 @@ private fun EditorContent(
                     draft.fields = draft.fields.map { if (it.id == target) it.copy(value = generated) else it }
                 }
                 generatorTarget = null
+            }
+        )
+    }
+
+    if (sharingQr) {
+        editor.saved?.let { s ->
+            ShareLoginQrDialog(
+                login = SharedLogin(s.serviceName, s.websiteUrl, s.username, s.password, s.notes, s.category, s.fields),
+                onDismiss = { sharingQr = false }
+            )
+        }
+    }
+
+    if (suggestingUsername) {
+        UsernameGeneratorDialog(
+            onDismiss = { suggestingUsername = false },
+            onUse = { name ->
+                draft.username.replaceAllText(name)
+                suggestingUsername = false
             }
         )
     }
@@ -419,8 +465,12 @@ private fun EditorTopBar(
     onBack: () -> Unit,
     onToggleFavorite: () -> Unit,
     onEdit: () -> Unit,
+    canEdit: Boolean = true,
     onSave: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    /** Null hides the button (no app lock, or a login not saved yet). */
+    isLocked: Boolean? = null,
+    onToggleLock: () -> Unit = {}
 ) {
     Row(
         modifier = Modifier
@@ -438,7 +488,16 @@ private fun EditorTopBar(
         if (isEditing) {
             TextButton(onClick = onSave, enabled = canSave) { Text("Save") }
         } else {
-            TextButton(onClick = onEdit) { Text("Edit") }
+            if (isLocked != null) {
+                IconButton(onClick = onToggleLock) {
+                    Icon(
+                        TazIcons.Lock,
+                        contentDescription = if (isLocked) "Stop asking for the passcode to open" else "Ask for the passcode to open",
+                        tint = if (isLocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+            if (canEdit) TextButton(onClick = onEdit) { Text("Edit") }
             BarButton(TazIcons.Trash, "Delete", onDelete)
         }
     }
@@ -466,7 +525,10 @@ private fun ViewBody(
     onOpenWebsite: (String) -> Unit,
     revealedFields: Set<String>,
     onToggleFieldReveal: (String) -> Unit,
-    onCopyField: (CustomField) -> Unit
+    onCopyField: (CustomField) -> Unit,
+    onCopyOldPassword: (String) -> Unit,
+    onShareQr: () -> Unit,
+    onClearHistory: () -> Unit
 ) {
     Row(modifier = Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         CategoryBadge(category.icon, size = 44.dp)
@@ -529,6 +591,12 @@ private fun ViewBody(
     if (detail.notes.isNotBlank()) {
         ViewField(label = "Notes", value = detail.notes)
     }
+    PasswordHistorySection(history = detail.history, onCopy = onCopyOldPassword, onClear = onClearHistory)
+    TextButton(onClick = onShareQr, modifier = Modifier.padding(top = 12.dp)) {
+        Icon(TazIcons.QrScan, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.size(8.dp))
+        Text("Share to another phone")
+    }
 }
 
 @Composable
@@ -569,7 +637,8 @@ private fun EditBody(
     onPickCategory: () -> Unit,
     revealedFields: Set<String>,
     onToggleFieldReveal: (String) -> Unit,
-    onGenerateField: (String) -> Unit
+    onGenerateField: (String) -> Unit,
+    onGenerateUsername: () -> Unit
 ) {
     CategoryButton(category = category, onClick = onPickCategory, modifier = Modifier.padding(top = 8.dp))
 
@@ -587,7 +656,15 @@ private fun EditBody(
     val showWebsite = category.usesLoginFields || draft.websiteUrl.text.isNotEmpty()
 
     if (showUsername) {
-        FieldLabel("Username or email")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            FieldLabel("Username or email")
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = onGenerateUsername) {
+                Icon(TazIcons.Generate, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(6.dp))
+                Text("Suggest")
+            }
+        }
         FieldContainer {
             TextInput(
                 state = draft.username,

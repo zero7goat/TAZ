@@ -1,5 +1,7 @@
 package com.zero7goat.taz.core.backup
 
+import com.zero7goat.taz.features.passwords.domain.PasswordHistory
+import com.zero7goat.taz.features.passwords.domain.PasswordHistoryEntry
 import com.zero7goat.taz.core.fields.CustomField
 import com.zero7goat.taz.core.fields.CustomFields
 import com.zero7goat.taz.core.tags.TagNames
@@ -49,6 +51,8 @@ internal object BackupPaths {
     const val SETTINGS = "data/settings.json"
     const val TAGS = "data/tags.json"
     const val CATEGORIES = "data/categories.json"
+    /** Version 3 (TAZ 2.0): note templates and autofill app links. Optional, so older backups lack it. */
+    const val EXTRAS = "data/extras.json"
     const val FILE_BLOB_PREFIX = "blobs/files/"
     const val NOTE_IMAGE_PREFIX = "blobs/notes/"
 
@@ -62,8 +66,8 @@ internal object BackupPaths {
 
     const val FORMAT_NAME = "taz-backup"
 
-    /** Written by this version. Versions 1 (TAZ 1.0 / 1.1) and 2 can both be restored. */
-    const val CONTENT_VERSION = 2
+    /** Written by this version (TAZ 2.0). Versions 1 (TAZ 1.0 / 1.1), 2 (1.2) and 3 can all be restored. */
+    const val CONTENT_VERSION = 3
     const val OLDEST_READABLE_VERSION = 1
 
     private val SAFE_ID = Regex("^[A-Za-z0-9-]{1,64}$")
@@ -98,7 +102,11 @@ class BackupArchiveWriter(private val checkCancelled: () -> Unit = {}) {
         fileBlob: (FileRecord) -> File?,
         noteImage: (String) -> File?,
         createdAt: Long,
-        skippedLogins: Int = 0
+        skippedLogins: Int = 0,
+        /** Opens a stored copy for reading (TAZ 2.0 decrypts encrypted files here). */
+        openBlob: (path: String, file: File) -> InputStream = { _, file -> FileInputStream(file) },
+        /** The size of the contents [openBlob] returns. */
+        blobSize: (path: String, file: File) -> Long = { _, file -> file.length() }
     ): BackupSummary {
         val fileBlobs = LinkedHashMap<String, File>()
         val missingFiles = ArrayList<String>()
@@ -118,7 +126,7 @@ class BackupArchiveWriter(private val checkCancelled: () -> Unit = {}) {
         val blobEntries = ArrayList<Pair<String, File>>()
         fileBlobs.forEach { (id, file) -> blobEntries += BackupPaths.FILE_BLOB_PREFIX + id to file }
         images.forEach { (name, file) -> blobEntries += BackupPaths.NOTE_IMAGE_PREFIX + name to file }
-        val sizes = blobEntries.map { (path, file) -> path to file.length() }
+        val sizes = blobEntries.map { (path, file) -> path to blobSize(path, file) }
 
         val manifest = JSONObject()
             .put("format", BackupPaths.FORMAT_NAME)
@@ -149,6 +157,7 @@ class BackupArchiveWriter(private val checkCancelled: () -> Unit = {}) {
         zip.putJson(BackupPaths.SETTINGS, JSONObject(contents.settings as Map<*, *>).toString())
         zip.putJson(BackupPaths.TAGS, tagsJson(contents.tags, contents.tagLinks))
         zip.putJson(BackupPaths.CATEGORIES, categoriesJson(contents.categories))
+        zip.putJson(BackupPaths.EXTRAS, extrasJson(contents.noteTemplates, contents.appLinks))
 
         // Photos, PDFs and archives rarely compress: favor speed for file contents.
         zip.setLevel(Deflater.BEST_SPEED)
@@ -158,7 +167,7 @@ class BackupArchiveWriter(private val checkCancelled: () -> Unit = {}) {
             zip.putNextEntry(ZipEntry(path))
             var copied = 0L
             try {
-                FileInputStream(file).use { input ->
+                openBlob(path, file).use { input ->
                     while (true) {
                         val read = input.read(buffer)
                         if (read < 0) break
@@ -258,7 +267,7 @@ class BackupArchiveReader(
                 val name = entry.name
                 if (entry.isDirectory) throw BackupException(BackupError.INVALID_CONTENT)
                 when {
-                    name in BackupPaths.DATA_ENTRIES -> {
+                    name in BackupPaths.DATA_ENTRIES || name == BackupPaths.EXTRAS -> {
                         if (json.containsKey(name)) throw BackupException(BackupError.INVALID_CONTENT)
                         json[name] = readJson(zip)
                     }
@@ -285,7 +294,9 @@ class BackupArchiveReader(
                 settings = parseSettings(json.getValue(BackupPaths.SETTINGS)),
                 tags = tagsText?.let { parseTags(it) }.orEmpty(),
                 tagLinks = tagsText?.let { parseTagLinks(it) }.orEmpty(),
-                categories = json[BackupPaths.CATEGORIES]?.let { parseCategories(it) }.orEmpty()
+                categories = json[BackupPaths.CATEGORIES]?.let { parseCategories(it) }.orEmpty(),
+                noteTemplates = json[BackupPaths.EXTRAS]?.let { parseTemplates(it) }.orEmpty(),
+                appLinks = json[BackupPaths.EXTRAS]?.let { parseAppLinks(it) }.orEmpty()
             ).withoutDanglingTagLinks()
             validate(contents, manifest, filesDir)
             return StagedBackup(
@@ -423,7 +434,9 @@ class BackupArchiveReader(
             isFavorite = it.getBoolean("isFavorite"),
             isPinned = it.getBoolean("isPinned"),
             colorIndex = it.getInt("colorIndex"),
-            fields = parseFieldList(it)
+            fields = parseFieldList(it),
+            isLocked = it.optBoolean("isLocked", false),
+            remindAt = if (it.has("remindAt") && !it.isNull("remindAt")) it.getLong("remindAt") else null
         )
     }
 
@@ -440,9 +453,31 @@ class BackupArchiveReader(
             createdAt = it.getLong("createdAt"),
             updatedAt = it.getLong("updatedAt"),
             category = it.optString("category", "login").ifBlank { "login" }.take(MAX_ID_LENGTH),
-            fields = parseFieldList(it)
+            fields = parseFieldList(it),
+            history = parseHistory(it),
+            isLocked = it.optBoolean("isLocked", false)
         )
     }
+
+    /** Earlier passwords of a login; absent before version 3. */
+    private fun parseHistory(item: JSONObject): List<PasswordHistoryEntry> {
+        val array = item.optJSONArray("history") ?: return emptyList()
+        if (array.length() > 100) throw BackupException(BackupError.INVALID_CONTENT)
+        return PasswordHistory.decode(array.toString()).take(PasswordHistory.MAX_ENTRIES)
+    }
+
+    private fun parseTemplates(text: String): List<NoteTemplateRecord> =
+        (JSONObject(text).optJSONArray("templates") ?: JSONArray()).objects().map {
+            NoteTemplateRecord(
+                it.getString("id").take(MAX_ID_LENGTH), it.optString("name").take(60),
+                it.optString("title"), it.optString("body"), it.optLong("createdAt", 0L)
+            )
+        }
+
+    private fun parseAppLinks(text: String): List<AppLinkRecord> =
+        (JSONObject(text).optJSONArray("appLinks") ?: JSONArray()).objects().map {
+            AppLinkRecord(it.getString("packageName").take(255), it.getString("credentialId"), it.optLong("createdAt", 0L))
+        }
 
     /** Custom fields of a note or login; absent in version 1 backups. */
     private fun parseFieldList(item: JSONObject): List<CustomField> {
@@ -483,7 +518,9 @@ class BackupArchiveReader(
             "FILE" to files.mapTo(HashSet()) { it.id }
         )
         val kept = tagLinks.filter { link -> link.tagId in tagIds && items[link.itemType]?.contains(link.itemId) == true }.distinct()
-        return if (kept.size == tagLinks.size) this else copy(tagLinks = kept)
+        val loginIds = items.getValue("LOGIN")
+        val keptApps = appLinks.filter { it.credentialId in loginIds }.distinctBy { it.packageName to it.credentialId }
+        return if (kept.size == tagLinks.size && keptApps.size == appLinks.size) this else copy(tagLinks = kept, appLinks = keptApps)
     }
 
     private fun parseFiles(text: String): List<FileRecord> = JSONArray(text).objects().map {
@@ -498,7 +535,8 @@ class BackupArchiveReader(
             description = it.getString("description"),
             isFavorite = it.getBoolean("isFavorite"),
             createdAt = it.getLong("createdAt"),
-            updatedAt = it.getLong("updatedAt")
+            updatedAt = it.getLong("updatedAt"),
+            isLocked = it.optBoolean("isLocked", false)
         )
     }
 
@@ -596,6 +634,8 @@ private fun notesJson(notes: List<NoteRecord>): String = JSONArray().also { arra
                 .put("isPinned", it.isPinned)
                 .put("colorIndex", it.colorIndex)
                 .put("fields", JSONArray(CustomFields.encode(it.fields)))
+                .put("isLocked", it.isLocked)
+                .put("remindAt", it.remindAt ?: JSONObject.NULL)
         )
     }
 }.toString()
@@ -616,6 +656,8 @@ private fun credentialsJson(credentials: List<CredentialRecord>): String = JSONA
                 .put("updatedAt", it.updatedAt)
                 .put("category", it.category)
                 .put("fields", JSONArray(CustomFields.encode(it.fields)))
+                .put("history", JSONArray(PasswordHistory.encode(it.history)))
+                .put("isLocked", it.isLocked)
         )
     }
 }.toString()
@@ -657,6 +699,7 @@ private fun filesJson(files: List<FileRecord>): String = JSONArray().also { arra
                 .put("isFavorite", it.isFavorite)
                 .put("createdAt", it.createdAt)
                 .put("updatedAt", it.updatedAt)
+                .put("isLocked", it.isLocked)
         )
     }
 }.toString()
@@ -667,3 +710,14 @@ private fun JSONArray?.strings(): List<String> =
     if (this == null) emptyList() else (0 until length()).map { getString(it) }
 
 private fun JSONObject.optStringOrNull(key: String): String? = if (isNull(key)) null else getString(key)
+
+private fun extrasJson(templates: List<NoteTemplateRecord>, links: List<AppLinkRecord>): String = JSONObject()
+    .put("templates", JSONArray().also { array ->
+        templates.forEach {
+            array.put(JSONObject().put("id", it.id).put("name", it.name).put("title", it.title).put("body", it.body).put("createdAt", it.createdAt))
+        }
+    })
+    .put("appLinks", JSONArray().also { array ->
+        links.forEach { array.put(JSONObject().put("packageName", it.packageName).put("credentialId", it.credentialId).put("createdAt", it.createdAt)) }
+    })
+    .toString()

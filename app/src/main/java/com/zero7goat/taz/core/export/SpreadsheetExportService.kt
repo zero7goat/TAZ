@@ -1,5 +1,6 @@
 package com.zero7goat.taz.core.export
 
+import com.zero7goat.taz.core.storage.VaultPaths
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
@@ -28,7 +29,7 @@ class ExportException : Exception("Export failed")
 class SpreadsheetExportService(private val context: Context, private val database: TazDatabase) {
 
     suspend fun export(uri: Uri): ExportSummary = withContext(Dispatchers.IO) {
-        val vault = VaultFileStore(context.applicationContext.filesDir)
+        val vault = VaultFileStore(VaultPaths.root(context))
         val data = database.withTransaction {
             val folders = database.folderDao().getAll()
             ExportData(

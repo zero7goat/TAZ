@@ -8,7 +8,10 @@ class HealthInput(
     val id: String,
     val serviceName: String,
     val password: String,
-    val updatedAt: Long
+    val updatedAt: Long,
+    val username: String = "",
+    /** The website host, or empty. Duplicates are logins with the same site (or name) and username. */
+    val domain: String = ""
 ) {
     override fun toString(): String = "HealthInput(id=$id, password=hidden)"
 }
@@ -28,11 +31,15 @@ data class HealthReport(
     val unreadable: Int,
     val weak: List<HealthEntry>,
     val reused: List<ReusedGroup>,
-    val old: List<HealthEntry>
+    val old: List<HealthEntry>,
+    /** Passwords that are, or are obvious variations of, commonly leaked ones. */
+    val leaked: List<HealthEntry> = emptyList(),
+    /** Logins for the same site and username, which could be merged into one. */
+    val duplicates: List<ReusedGroup> = emptyList()
 ) {
     val reusedLoginCount: Int get() = reused.sumOf { it.logins.size }
-    val issueCount: Int get() = weak.size + reusedLoginCount + old.size
-    val isAllGood: Boolean get() = weak.isEmpty() && reused.isEmpty() && old.isEmpty()
+    val issueCount: Int get() = weak.size + reusedLoginCount + old.size + leaked.size
+    val isAllGood: Boolean get() = weak.isEmpty() && reused.isEmpty() && old.isEmpty() && leaked.isEmpty()
 }
 
 /**
@@ -53,6 +60,8 @@ object PasswordHealth {
 
         val weak = logins.filter { isWeak(it.password) }.map { it.toEntry() }.sortedWith(byName)
         val old = logins.filter { it.updatedAt < cutoff }.map { it.toEntry() }.sortedWith(byName)
+        // Weak ones are already reported as weak; this catches the long-but-guessable ones too.
+        val leaked = logins.filter { !isWeak(it.password) && LeakCheck.isCommonlyLeaked(it.password) }.map { it.toEntry() }.sortedWith(byName)
 
         // Empty passwords are already reported as weak; they are not "the same password".
         val reused = logins.filter { it.password.isNotEmpty() }
@@ -67,7 +76,14 @@ object PasswordHealth {
             unreadable = unreadable,
             weak = weak,
             reused = reused,
-            old = old
+            old = old,
+            leaked = leaked,
+            duplicates = logins
+                .filter { it.username.isNotBlank() }
+                .groupBy { (it.domain.ifBlank { it.serviceName }).lowercase(Locale.ROOT).trim() to it.username.lowercase(Locale.ROOT).trim() }
+                .values
+                .filter { it.size > 1 }
+                .map { group -> ReusedGroup(group.map { it.toEntry() }.sortedWith(byName)) }
         )
     }
 

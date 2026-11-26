@@ -44,7 +44,12 @@ data class CredentialEntity(
     @ColumnInfo(defaultValue = "login")
     val category: String = "login",
     /** The custom fields as one encrypted blob, or null when there are none. */
-    val fieldsCipher: ByteArray? = null
+    val fieldsCipher: ByteArray? = null,
+    /** Earlier passwords with the date they were replaced, as one encrypted blob, or null. */
+    val historyCipher: ByteArray? = null,
+    /** Asks for the passcode again before the login opens, even while TAZ is unlocked. */
+    @ColumnInfo(defaultValue = "0")
+    val isLocked: Boolean = false
 ) {
     // Ciphertext is never printed.
     override fun toString(): String = "CredentialEntity(id=$id)"
@@ -61,7 +66,8 @@ data class CredentialListRow(
     val isFavorite: Boolean,
     val updatedAt: Long,
     val category: String,
-    val createdAt: Long
+    val createdAt: Long,
+    val isLocked: Boolean = false
 ) {
     override fun toString(): String = "CredentialListRow(id=$id)"
 }

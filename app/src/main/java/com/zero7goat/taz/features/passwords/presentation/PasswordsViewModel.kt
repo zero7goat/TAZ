@@ -347,9 +347,11 @@ class PasswordsViewModel(
                     serviceName = row.serviceName,
                     websiteUrl = row.websiteUrl,
                     domain = row.domain,
-                    username = repository.usernameFor(row),
+                    // A login with its own lock shows nothing but its name until opened.
+                    username = if (row.isLocked) "" else repository.usernameFor(row),
                     isFavorite = row.isFavorite,
-                    category = row.category
+                    category = row.category,
+                    isLocked = row.isLocked
                 )
             }
         }
@@ -492,6 +494,29 @@ class PasswordsViewModel(
                 _editor.update {
                     it.copy(isFavorite = newValue, saved = it.saved?.copy(isFavorite = newValue))
                 }
+            }
+        }
+    }
+
+    /** Forgets the earlier passwords of the open login. */
+    fun clearEditorHistory() {
+        val id = _editor.value.credentialId ?: return
+        viewModelScope.launch {
+            editorLock.withLock {
+                repository.clearHistory(id)
+                _editor.update { it.copy(saved = it.saved?.copy(history = emptyList())) }
+            }
+        }
+    }
+
+    /** Turns the extra passcode check of the open (saved) login on or off. */
+    fun setEditorLocked(locked: Boolean) {
+        val id = _editor.value.credentialId ?: return
+        if (_editor.value.saved == null) return
+        viewModelScope.launch {
+            editorLock.withLock {
+                repository.setLocked(id, locked)
+                _editor.update { it.copy(saved = it.saved?.copy(isLocked = locked)) }
             }
         }
     }

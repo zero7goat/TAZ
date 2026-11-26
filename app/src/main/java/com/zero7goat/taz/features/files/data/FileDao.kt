@@ -25,6 +25,16 @@ interface FileDao {
     @Query("SELECT id, displayName FROM files WHERE folderId IS :folderId AND deletedAt IS NULL")
     suspend fun namesInFolder(folderId: String?): List<FileNameRow>
 
+    /** Files whose stored copy has not been encrypted yet (from before 2.0, or just restored). */
+    @Query("SELECT * FROM files WHERE encryption = 0")
+    suspend fun unencrypted(): List<FileEntity>
+
+    @Query("UPDATE files SET encryption = :value WHERE id = :id")
+    suspend fun setEncryption(id: String, value: Int)
+
+    @Query("UPDATE files SET isLocked = :locked WHERE id = :id")
+    suspend fun setLocked(id: String, locked: Boolean)
+
     @Query("SELECT storedPath FROM files")
     suspend fun allStoredPaths(): List<String>
 

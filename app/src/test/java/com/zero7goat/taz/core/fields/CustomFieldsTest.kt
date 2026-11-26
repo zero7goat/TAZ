@@ -27,6 +27,21 @@ class CustomFieldsTest {
     }
 
     @Test
+    fun twoFactorFieldsAreHiddenValidatedAndOnlyChangeTypeSafely() {
+        val totp = field(FieldType.TOTP, "JBSWY3DPEHPK3PXP", hidden = false)
+        assertTrue(totp.isHidden)
+        assertEquals("totp", FieldType.TOTP.key) // stored key: must never change
+        assertTrue(CustomFields.isValidValue(FieldType.TOTP, "JBSWY3DPEHPK3PXP"))
+        assertFalse(CustomFields.isValidValue(FieldType.TOTP, "not a key"))
+        assertFalse(CustomFields.isSearchable(totp))
+        // A plain password can't silently become a two-factor field; a valid key can.
+        assertFalse(CustomFields.canChangeType(field(FieldType.SECRET, "hunter2"), FieldType.TOTP))
+        assertTrue(CustomFields.canChangeType(field(FieldType.SECRET, "JBSWY3DPEHPK3PXP"), FieldType.TOTP))
+        // Turning it back into a secret keeps it hidden.
+        assertTrue(totp.copy(type = FieldType.TEXT).isHidden)
+    }
+
+    @Test
     fun toStringNeverShowsValues() {
         val text = field(FieldType.SECRET, "synthetic-secret-marker").toString() +
             listOf(field(FieldType.TEXT, "visible-marker")).toString()

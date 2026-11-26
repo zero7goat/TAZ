@@ -1,5 +1,6 @@
 package com.zero7goat.taz.features.trash.data
 
+import com.zero7goat.taz.core.storage.VaultPaths
 import android.content.Context
 import com.zero7goat.taz.core.database.TazDatabase
 import com.zero7goat.taz.core.database.TrashRow
@@ -82,9 +83,9 @@ class TrashRepository(
             val app = context.applicationContext
             val database = TazDatabase.getInstance(app)
             return TrashRepository(
-                notes = NoteRepository(database.noteDao(), NoteImageStore(app.filesDir)),
+                notes = NoteRepository(database.noteDao(), NoteImageStore(VaultPaths.root(app))),
                 credentials = CredentialRepository(database.credentialDao(), KeystoreFieldCipher()),
-                files = FileRepository(database.fileDao(), VaultFileStore(app.filesDir), app),
+                files = FileRepository(database.fileDao(), VaultFileStore(VaultPaths.root(app)), app),
                 tags = TagRepository(database.tagDao())
             )
         }

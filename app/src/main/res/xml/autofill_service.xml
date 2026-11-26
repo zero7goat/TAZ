@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  TAZ's autofill service. Browsers that support autofill services natively (Chrome, Firefox,
+  Brave, Edge and others: "Autofill using another service" in their settings) need nothing here.
+  The packages below are older browsers that only work in Android's compatibility mode.
+-->
+<autofill-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity="com.zero7goat.taz.TazActivity">
+    <compatibility-package android:name="com.android.chrome" android:maxLongVersionCode="10000000000" />
+    <compatibility-package android:name="com.chrome.beta" android:maxLongVersionCode="10000000000" />
+    <compatibility-package android:name="com.brave.browser" android:maxLongVersionCode="10000000000" />
+    <compatibility-package android:name="com.microsoft.emmx" android:maxLongVersionCode="10000000000" />
+    <compatibility-package android:name="com.sec.android.app.sbrowser" android:maxLongVersionCode="10000000000" />
+    <compatibility-package android:name="com.opera.browser" android:maxLongVersionCode="10000000000" />
+    <compatibility-package android:name="com.vivaldi.browser" android:maxLongVersionCode="10000000000" />
+    <compatibility-package android:name="com.duckduckgo.mobile.android" android:maxLongVersionCode="10000000000" />
+</autofill-service>

@@ -8,7 +8,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.animateColorAsState
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.DisposableEffect
+import com.zero7goat.taz.core.AppContainer
 import com.zero7goat.taz.core.fields.CustomFields
+import com.zero7goat.taz.core.ui.ItemLockGate
+import com.zero7goat.taz.core.ui.itemLockKey
 import com.zero7goat.taz.core.security.ClipboardGuard
 import com.zero7goat.taz.core.security.SecureWindow
 import com.zero7goat.taz.core.tags.TagTarget
@@ -116,7 +119,10 @@ fun NoteEditorScreen(noteId: String, onClose: () -> Unit, modifier: Modifier = M
         contentColor = MaterialTheme.colorScheme.onBackground
     ) {
         if (editor.noteId == noteId && editor.isLoaded) {
-            EditorContent(editor = editor, viewModel = viewModel, onClose = onClose)
+            // A note with its own lock asks for the passcode again before anything is shown.
+            ItemLockGate(locked = editor.isLocked && !editor.isNewNote, itemKey = itemLockKey("NOTE", noteId), title = editor.title.ifBlank { "Locked note" }) {
+                EditorContent(editor = editor, viewModel = viewModel, onClose = onClose)
+            }
         } else {
             // Still loading: back simply leaves.
             BackHandler {
@@ -168,6 +174,11 @@ private fun EditorContent(editor: EditorUiState, viewModel: NotesViewModel, onCl
     val allTags by tagsViewModel.tags.collectAsStateWithLifecycle()
     val noteTags by remember(noteId) { tagsViewModel.itemTags(TagTarget.NOTE, noteId) }.collectAsStateWithLifecycle(emptyList())
     var pickingTags by remember { mutableStateOf(false) }
+    var pickingReminder by remember { mutableStateOf(false) }
+    var showingHistory by remember { mutableStateOf(false) }
+    var savingTemplate by remember { mutableStateOf(false) }
+    val appLockOn by AppContainer.lockManager(context).hasPasscode.collectAsStateWithLifecycle()
+    val templates by viewModel.templates.collectAsStateWithLifecycle(emptyList())
     // Hidden field values are shown only while revealed, and never restored from saved state.
     var revealedFields by remember { mutableStateOf(emptySet<String>()) }
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { revealedFields = emptySet() }
@@ -211,6 +222,18 @@ private fun EditorContent(editor: EditorUiState, viewModel: NotesViewModel, onCl
                 } else {
                     confirmDelete = true
                 }
+            },
+            extras = {
+                NoteMoreMenu(
+                    lockAvailable = appLockOn,
+                    isLocked = editor.isLocked,
+                    remindAt = editor.remindAt,
+                    onToggleLock = { viewModel.setEditorLocked(!editor.isLocked) },
+                    onPickReminder = { pickingReminder = true },
+                    onClearReminder = { viewModel.setEditorReminder(null) },
+                    onHistory = { showingHistory = true },
+                    onSaveTemplate = { savingTemplate = true }
+                )
             }
         )
         Column(
@@ -244,6 +267,14 @@ private fun EditorContent(editor: EditorUiState, viewModel: NotesViewModel, onCl
                     modifier = Modifier.padding(top = 20.dp)
                 )
             } else {
+                if (editor.isNewNote && titleState.text.isBlank() && bodyState.text.isBlank()) {
+                    TemplateChips(templates) { template ->
+                        titleState.replaceAllText(template.title)
+                        bodyState.replaceAllText(template.body)
+                        pushText()
+                    }
+                    Spacer(Modifier.size(12.dp))
+                }
                 PlainField(
                     state = titleState,
                     placeholder = "Title",
@@ -306,6 +337,43 @@ private fun EditorContent(editor: EditorUiState, viewModel: NotesViewModel, onCl
                 }
             )
         }
+    }
+
+    if (pickingReminder) {
+        ReminderPicker(
+            initial = editor.remindAt,
+            onPicked = { at ->
+                pushText()
+                viewModel.setEditorReminder(at)
+                pickingReminder = false
+            },
+            onDismiss = { pickingReminder = false }
+        )
+    }
+    if (showingHistory) {
+        val versions by remember(noteId) { viewModel.versions(noteId) }.collectAsStateWithLifecycle(emptyList())
+        NoteHistoryDialog(
+            versions = versions,
+            onRestore = { version ->
+                // The current text becomes a version itself the next time the note is saved.
+                titleState.replaceAllText(version.title)
+                descriptionState.replaceAllText(version.description)
+                bodyState.replaceAllText(version.body)
+                pushText()
+                showingHistory = false
+            },
+            onDelete = { viewModel.deleteVersion(it.id) },
+            onDismiss = { showingHistory = false }
+        )
+    }
+    if (savingTemplate) {
+        SaveTemplateDialog(
+            onSave = { name ->
+                viewModel.saveAsTemplate(name, titleState.text.toString(), bodyState.text.toString())
+                savingTemplate = false
+            },
+            onDismiss = { savingTemplate = false }
+        )
     }
 
     if (pickingTags) {
@@ -384,7 +452,8 @@ private fun EditorTopBar(
     onTogglePreview: () -> Unit,
     onTogglePinned: () -> Unit,
     onToggleFavorite: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    extras: @Composable () -> Unit = {}
 ) {
     Row(
         modifier = Modifier
@@ -406,6 +475,7 @@ private fun EditorTopBar(
             onClick = onToggleFavorite
         )
         BarButton(TazIcons.Trash, "Delete", onDelete)
+        extras()
     }
 }
 

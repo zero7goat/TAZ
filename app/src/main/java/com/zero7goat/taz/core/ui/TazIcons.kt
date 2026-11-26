@@ -690,6 +690,81 @@ object TazIcons {
             }
         }
     }
+
+    /** Two-factor codes: a stopwatch. */
+    val Timer: ImageVector by lazy {
+        tazIcon("Timer") {
+            outline(1.8f) {
+                circle(12f, 13.5f, 7f)
+                moveTo(12f, 13.5f); verticalLineTo(10f)
+                moveTo(10f, 3.5f); horizontalLineTo(14f)
+                moveTo(12f, 3.5f); verticalLineTo(6.5f)
+                moveTo(18.2f, 6.8f); lineTo(19.4f, 5.6f)
+            }
+        }
+    }
+
+    val QrScan: ImageVector by lazy {
+        tazIcon("QrScan") {
+            outline(1.8f) {
+                // Viewfinder corners around a small code.
+                moveTo(3.5f, 8f); verticalLineTo(3.5f); horizontalLineTo(8f)
+                moveTo(16f, 3.5f); horizontalLineTo(20.5f); verticalLineTo(8f)
+                moveTo(20.5f, 16f); verticalLineTo(20.5f); horizontalLineTo(16f)
+                moveTo(8f, 20.5f); horizontalLineTo(3.5f); verticalLineTo(16f)
+                moveTo(8f, 8f); horizontalLineTo(11f); verticalLineTo(11f); horizontalLineTo(8f); close()
+                moveTo(13f, 13f); horizontalLineTo(16f); verticalLineTo(16f); horizontalLineTo(13f); close()
+                moveTo(13.5f, 8.5f); lineTo(15.5f, 8.5f)
+                moveTo(8.5f, 15.5f); lineTo(10.5f, 15.5f)
+            }
+        }
+    }
+
+    /** Bringing logins in from another app: an arrow into a tray. */
+    val Import: ImageVector by lazy {
+        tazIcon("Import") {
+            outline(1.8f) {
+                moveTo(12f, 3.5f); verticalLineTo(14f)
+                moveTo(8f, 10f); lineTo(12f, 14f); lineTo(16f, 10f)
+                moveTo(4f, 14.5f); verticalLineTo(19.5f); horizontalLineTo(20f); verticalLineTo(14.5f)
+            }
+        }
+    }
+
+    /** Sending logins out to a file: an arrow out of a tray. */
+    val Export: ImageVector by lazy {
+        tazIcon("Export") {
+            outline(1.8f) {
+                moveTo(12f, 14f); verticalLineTo(3.5f)
+                moveTo(8f, 7.5f); lineTo(12f, 3.5f); lineTo(16f, 7.5f)
+                moveTo(4f, 14.5f); verticalLineTo(19.5f); horizontalLineTo(20f); verticalLineTo(14.5f)
+            }
+        }
+    }
+
+    /** Autofill: a text box with a key filling it in. */
+    val Autofill: ImageVector by lazy {
+        tazIcon("Autofill") {
+            outline(1.8f) {
+                moveTo(14f, 7.5f); horizontalLineTo(4.5f); verticalLineTo(14.5f); horizontalLineTo(9f)
+                moveTo(7.5f, 11f); lineTo(7.51f, 11f)
+                moveTo(10.5f, 11f); lineTo(10.51f, 11f)
+                circle(16.5f, 11f, 2.5f)
+                moveTo(16.5f, 13.5f); verticalLineTo(20f)
+                moveTo(16.5f, 17f); horizontalLineTo(18.5f)
+            }
+        }
+    }
+
+    val Camera: ImageVector by lazy {
+        tazIcon("Camera") {
+            outline(1.8f) {
+                moveTo(3.5f, 8f); horizontalLineTo(7.5f); lineTo(9f, 5.5f); horizontalLineTo(15f); lineTo(16.5f, 8f)
+                horizontalLineTo(20.5f); verticalLineTo(19f); horizontalLineTo(3.5f); close()
+                circle(12f, 13.2f, 3.3f)
+            }
+        }
+    }
 }
 
 private fun tazIcon(name: String, block: ImageVector.Builder.() -> Unit): ImageVector =

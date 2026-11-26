@@ -2,6 +2,18 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Only for scanning two-factor QR codes, asked for the first time the scanner is opened.
+         Frames are read in memory and never saved. TAZ still has no internet permission. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera.any" android:required="false" />
+
+    <!-- Local reminders (note reminders, expiry dates, old passwords). Asked for when first used. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Voice notes recorded straight into the vault. Asked for when first used. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Added by WorkManager for network conditions TAZ never uses: removed, TAZ never checks the network. -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" tools:node="remove" />
+
     <application
         android:allowBackup="false"
         android:dataExtractionRules="@xml/data_extraction_rules"
@@ -12,22 +24,149 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.TAZ">
         <activity
-            android:name=".MainActivity"
+            android:name=".TazActivity"
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@style/Theme.TAZ"
-            android:windowSoftInputMode="adjustResize">
+            android:windowSoftInputMode="adjustResize" />
+
+        <!--
+            Home-screen entries. Exactly one is enabled at a time (Settings → App icon).
+            ".MainActivity" is the normal TAZ icon: DO NOT RENAME it, it is the launcher component
+            every version since 1.0 used, so home-screen icons survive updates. The others disguise
+            TAZ as another app.
+        -->
+        <activity-alias
+            android:name=".MainActivity"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@mipmap/taz_launcher"
+            android:label="@string/app_name"
+            android:roundIcon="@mipmap/taz_launcher_round"
+            android:targetActivity=".TazActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
             <!-- Home-screen shortcut: long-press the icon for "New note". -->
             <meta-data
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
-        </activity>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherCalculator"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/disguise_calculator"
+            android:label="@string/disguise_calculator"
+            android:roundIcon="@mipmap/disguise_calculator"
+            android:targetActivity=".TazActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherNotes"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/disguise_notes"
+            android:label="@string/disguise_notes"
+            android:roundIcon="@mipmap/disguise_notes"
+            android:targetActivity=".TazActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+        <activity-alias
+            android:name=".LauncherWeather"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@mipmap/disguise_weather"
+            android:label="@string/disguise_weather"
+            android:roundIcon="@mipmap/disguise_weather"
+            android:targetActivity=".TazActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity-alias>
+
+        <!-- Autofill: fills logins in other apps and browsers once the user picks TAZ in system settings. -->
+        <service
+            android:name=".features.autofill.TazAutofillService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_AUTOFILL_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.autofill.AutofillService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.autofill"
+                android:resource="@xml/autofill_service" />
+        </service>
+
+        <!-- Home-screen widget (shortcuts only). The lock button is a broadcast to this receiver. -->
+        <receiver
+            android:name=".core.TazWidget"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_taz_info" />
+        </receiver>
+
+        <!-- Passkeys (Android 14+): TAZ as a credential provider, and the screen it opens. -->
+        <service
+            android:name=".features.passkeys.TazCredentialService"
+            tools:targetApi="34"
+            android:enabled="@bool/passkeys_supported"
+            android:exported="true"
+            android:icon="@mipmap/taz_launcher"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_CREDENTIAL_PROVIDER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.credentials.CredentialProviderService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.credentials.provider"
+                android:resource="@xml/credential_provider" />
+        </service>
+        <activity
+            android:name=".features.passkeys.PasskeyActivity"
+            tools:targetApi="34"
+            android:enabled="@bool/passkeys_supported"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity=""
+            android:theme="@style/Theme.TAZ" />
+
+        <!-- "Lock TAZ" tile in the quick-settings panel. -->
+        <service
+            android:name=".core.security.LockTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_tile_lock"
+            android:label="Lock TAZ"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="false" />
+        </service>
+
+        <!-- The lock screen and login picker that autofill opens. Only reachable through autofill. -->
+        <activity
+            android:name=".features.autofill.AutofillPickerActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity=""
+            android:theme="@style/Theme.TAZ"
+            android:windowSoftInputMode="adjustResize" />
 
         <!-- Shares copies of stored files with other apps as content:// URIs (see res/xml/file_paths.xml). -->
         <provider

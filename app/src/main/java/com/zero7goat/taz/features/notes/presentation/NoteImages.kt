@@ -1,5 +1,6 @@
 package com.zero7goat.taz.features.notes.presentation
 
+import com.zero7goat.taz.core.storage.VaultPaths
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -77,7 +78,7 @@ internal fun NoteImage(name: String, modifier: Modifier = Modifier) {
     val context = LocalContext.current
     val state by produceState<ImageState>(ImageState.Loading, name) {
         value = withContext(Dispatchers.IO) {
-            val file = NoteImageStore(context.applicationContext.filesDir).resolve(name)
+            val file = NoteImageStore(VaultPaths.root(context)).resolve(name)
             file?.let { decodeScaled(it) }?.let { ImageState.Ready(it.asImageBitmap()) } ?: ImageState.Missing
         }
     }

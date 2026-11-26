@@ -42,12 +42,24 @@ import com.zero7goat.taz.core.security.BiometricAuth
 import com.zero7goat.taz.core.security.BiometricAvailability
 import com.zero7goat.taz.core.settings.AutoLockTimeout
 import com.zero7goat.taz.core.settings.ClipboardClearTimeout
+import com.zero7goat.taz.core.settings.AutoBackupFrequency
+import com.zero7goat.taz.core.settings.FeaturePrefs
+import com.zero7goat.taz.core.settings.FeatureSettings
+import com.zero7goat.taz.core.settings.AppDisguise
+import com.zero7goat.taz.core.settings.AppIcon
+import com.zero7goat.taz.core.backup.EmergencySheet
+import com.zero7goat.taz.core.transfer.ReceiveLoginQrDialog
+import com.zero7goat.taz.core.security.VaultMode
+import com.zero7goat.taz.core.reminders.Reminders
+import android.os.Build
 import com.zero7goat.taz.core.settings.FontSize
 import com.zero7goat.taz.core.settings.ThemeMode
 import com.zero7goat.taz.core.ui.AppFonts
 import com.zero7goat.taz.core.ui.ScreenHeader
 import com.zero7goat.taz.core.ui.TazIcons
 import com.zero7goat.taz.core.ui.findFragmentActivity
+import com.zero7goat.taz.features.autofill.openAutofillSettings
+import com.zero7goat.taz.features.autofill.rememberAutofillEnabled
 import java.time.LocalDate
 import kotlinx.coroutines.launch
 
@@ -65,6 +77,15 @@ private sealed interface SettingsDialog {
     data object BackupPassphrase : SettingsDialog
     data object RestoreConfirm : SettingsDialog
     data object ExportInfo : SettingsDialog
+    data object ImportInfo : SettingsDialog
+    data object ExportCsv : SettingsDialog
+    data object AuthenticatorImport : SettingsDialog
+    data object AutoBackup : SettingsDialog
+    data object Duress : SettingsDialog
+    data object WipeAfter : SettingsDialog
+    data object AppIconChoice : SettingsDialog
+    data object RemindersChoice : SettingsDialog
+    data object ReceiveLogin : SettingsDialog
 }
 
 private fun ThemeMode.label() = when (this) {
@@ -108,6 +129,7 @@ fun SettingsScreen(
     onOpenPasswordHealth: () -> Unit,
     onOpenTags: () -> Unit,
     onOpenCategories: () -> Unit,
+    onOpenCodes: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -135,6 +157,27 @@ fun SettingsScreen(
     val createExport = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(XLSX_MIME)) { uri ->
         if (uri != null) viewModel.startExport(uri)
     }
+    val pickImport = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) viewModel.previewImport(uri)
+    }
+    val createCsv = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(CSV_MIME)) { uri ->
+        if (uri != null) viewModel.startCsvExport(uri)
+    }
+    val importPreview by viewModel.importPreview.collectAsStateWithLifecycle()
+    val createSheet = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri ->
+        if (uri != null) scope.launch {
+            try {
+                EmergencySheet.write(context, uri, FeaturePrefs(context).current().autoBackupFolder)
+                onMessage("Emergency sheet saved. Print it and keep it somewhere safe.")
+            } catch (e: Exception) {
+                onMessage("The sheet couldn't be saved")
+            }
+        }
+    }
+    val autofillEnabled = rememberAutofillEnabled()
+    val featurePrefs = remember(context) { FeaturePrefs(context) }
+    val features by featurePrefs.settings.collectAsStateWithLifecycle(FeatureSettings())
+    val hasDuress by viewModel.lock.hasDuress.collectAsStateWithLifecycle()
 
     val biometricSubtitle = when {
         !lockEnabled -> "Turn on app lock first."
@@ -156,6 +199,15 @@ fun SettingsScreen(
         SettingRow("Font", AppFonts.labelFor(settings.fontKey)) { dialog = SettingsDialog.Font }
         RowDivider()
         SettingRow("Text size", settings.fontSize.label()) { dialog = SettingsDialog.TextSize }
+        if (Build.VERSION.SDK_INT >= 31) {
+            RowDivider()
+            SwitchRow(
+                title = "Match wallpaper colours",
+                subtitle = "Material You colours from your wallpaper.",
+                checked = features.dynamicColor,
+                enabled = true
+            ) { on -> scope.launch { featurePrefs.setDynamicColor(on) } }
+        }
 
         SectionLabel("Security")
         SettingRow("App lock", if (lockEnabled) "On" else "Off") {
@@ -198,9 +250,51 @@ fun SettingsScreen(
             enabled = true
         ) { viewModel.setHideInRecents(it) }
         RowDivider()
+        // In the decoy vault, nothing hints that a duress passcode exists.
+        if (!VaultMode.isDecoy) {
+            SettingRow("Duress passcode", if (hasDuress) "On" else "Off", enabled = lockEnabled) { dialog = SettingsDialog.Duress }
+            RowDivider()
+        }
+        SettingRow(
+            "Erase after wrong passcodes",
+            if (features.wipeAfterAttempts == 0) "Never" else "After ${features.wipeAfterAttempts}",
+            enabled = lockEnabled
+        ) { dialog = SettingsDialog.WipeAfter }
+        RowDivider()
+        SwitchRow(
+            title = "Lock when the screen turns off",
+            subtitle = null,
+            checked = features.lockOnScreenOff && lockEnabled,
+            enabled = lockEnabled
+        ) { on -> scope.launch { featurePrefs.setLockOnScreenOff(on) } }
+        RowDivider()
+        SettingRow("App icon", if (features.disguise == AppDisguise.NONE) "TAZ" else features.disguise.label) { dialog = SettingsDialog.AppIconChoice }
+        RowDivider()
         SettingRow("Clear copied passwords", settings.clipboardClearTimeout.label()) {
             dialog = SettingsDialog.Clipboard
         }
+
+        SectionLabel("Autofill")
+        SettingRow(
+            "Fill logins in other apps",
+            if (autofillEnabled) "On" else "Off",
+            icon = TazIcons.Autofill
+        ) {
+            if (!openAutofillSettings(context)) onMessage("This device doesn't offer autofill settings")
+        }
+        Text(
+            text = if (autofillEnabled) {
+                "TAZ suggests your logins in apps and browsers and offers to save new ones. " +
+                    "It asks for your passcode first whenever TAZ is locked. In Chrome, also choose " +
+                    "Settings → Autofill services → \"Autofill using another service\"."
+            } else {
+                "Choose TAZ as your autofill service to fill usernames and passwords in apps and browsers, " +
+                    "without copying and pasting."
+            },
+            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.bodySmall
+        )
 
         SectionLabel("Tools")
         SettingRow("Tags", null, icon = TazIcons.Tag) { onOpenTags() }
@@ -210,6 +304,10 @@ fun SettingsScreen(
         SettingRow("Trash", null, icon = TazIcons.Trash) { onOpenTrash() }
         RowDivider()
         SettingRow("Password health", null, icon = TazIcons.Shield) { onOpenPasswordHealth() }
+        RowDivider()
+        SettingRow("Two-factor codes", null, icon = TazIcons.Timer) { onOpenCodes() }
+        RowDivider()
+        SettingRow("Reminders", null, icon = TazIcons.Calendar) { dialog = SettingsDialog.RemindersChoice }
 
         SectionLabel("Backup")
         SettingRow("Back up to a file", null, enabled = !busy, icon = TazIcons.Backup) {
@@ -223,7 +321,30 @@ fun SettingsScreen(
             launchOrReport(onMessage) { pickRestore.launch(arrayOf("*/*")) }
         }
         RowDivider()
+        SettingRow(
+            "Automatic backups",
+            when (features.autoBackupFrequency) {
+                AutoBackupFrequency.OFF -> "Off"
+                AutoBackupFrequency.DAILY -> "Daily"
+                AutoBackupFrequency.WEEKLY -> "Weekly"
+            },
+            icon = TazIcons.Calendar
+        ) { dialog = SettingsDialog.AutoBackup }
+        RowDivider()
         SettingRow("Export to spreadsheet (.xlsx)", null, enabled = !busy, icon = TazIcons.File) { dialog = SettingsDialog.ExportInfo }
+        RowDivider()
+        SettingRow("Emergency sheet (PDF to print)", null, icon = TazIcons.Page) {
+            launchOrReport(onMessage) { createSheet.launch("TAZ emergency sheet.pdf") }
+        }
+
+        SectionLabel("Move logins")
+        SettingRow("Import from another app", null, enabled = !busy, icon = TazIcons.Import) { dialog = SettingsDialog.ImportInfo }
+        RowDivider()
+        SettingRow("Import from Google Authenticator", null, enabled = !busy, icon = TazIcons.Timer) { dialog = SettingsDialog.AuthenticatorImport }
+        RowDivider()
+        SettingRow("Export logins to CSV", null, enabled = !busy, icon = TazIcons.Export) { dialog = SettingsDialog.ExportCsv }
+        RowDivider()
+        SettingRow("Receive a login from another phone", null, enabled = !busy, icon = TazIcons.QrScan) { dialog = SettingsDialog.ReceiveLogin }
         Text(
             text = "Backups are encrypted with a passphrase you choose and saved only where you pick. Nothing is " +
                 "uploaded or backed up automatically. Spreadsheet exports are not encrypted and never include passwords.",
@@ -349,7 +470,69 @@ fun SettingsScreen(
             },
             onDismiss = { dialog = null }
         )
+        SettingsDialog.ImportInfo -> ImportInfoDialog(
+            onContinue = {
+                dialog = null
+                launchOrReport(onMessage) { pickImport.launch(arrayOf("*/*")) }
+            },
+            onDismiss = { dialog = null }
+        )
+        SettingsDialog.Duress -> DuressPasscodeDialog(
+            hasDuress = hasDuress,
+            onSet = { current, duress -> viewModel.lock.setDuress(current, duress) },
+            onRemove = { viewModel.lock.removeDuress() },
+            onDone = { message -> dialog = null; onMessage(message) },
+            onDismiss = { dialog = null }
+        )
+        SettingsDialog.WipeAfter -> WipeAfterDialog(
+            current = features.wipeAfterAttempts,
+            onSelect = { count -> scope.launch { featurePrefs.setWipeAfterAttempts(count) } },
+            onDismiss = { dialog = null }
+        )
+        SettingsDialog.AppIconChoice -> AppIconDialog(
+            current = features.disguise,
+            onSelect = { choice ->
+                scope.launch {
+                    featurePrefs.setDisguise(choice)
+                    AppIcon.apply(context, choice)
+                    onMessage(if (choice == AppDisguise.NONE) "The TAZ icon is back" else "TAZ now appears as ${choice.label}")
+                }
+            },
+            onDismiss = { dialog = null }
+        )
+        SettingsDialog.RemindersChoice -> RemindersDialog(
+            expiryDays = features.expiryReminderDays,
+            passwordMonths = features.passwordAgeMonths,
+            onExpiry = { days -> scope.launch { featurePrefs.setExpiryReminderDays(days); Reminders.scheduleCheck(context) } },
+            onPasswords = { months -> scope.launch { featurePrefs.setPasswordAgeMonths(months); Reminders.scheduleCheck(context) } },
+            onDismiss = { dialog = null }
+        )
+        SettingsDialog.ReceiveLogin -> ReceiveLoginQrDialog(
+            onSave = { login -> dialog = null; viewModel.receiveShared(login) },
+            onDismiss = { dialog = null }
+        )
+        SettingsDialog.AutoBackup -> AutoBackupDialog(current = features, onMessage = onMessage, onDismiss = { dialog = null })
+        SettingsDialog.AuthenticatorImport -> AuthenticatorImportDialog(
+            onImport = { accounts ->
+                dialog = null
+                viewModel.importAuthenticator(accounts)
+            },
+            onDismiss = { dialog = null }
+        )
+        SettingsDialog.ExportCsv -> ExportCsvDialog(
+            lockEnabled = lockEnabled,
+            onVerify = { viewModel.lock.verify(it) },
+            onContinue = {
+                dialog = null
+                launchOrReport(onMessage) { createCsv.launch("TAZ logins ${LocalDate.now()}.csv") }
+            },
+            onDismiss = { dialog = null }
+        )
         null -> Unit
+    }
+
+    importPreview?.let { preview ->
+        ImportPreviewDialog(preview = preview, onImport = viewModel::confirmImport, onDismiss = viewModel::cancelImport)
     }
 
     TransferDialog(state = transfer, onDismiss = viewModel::dismissTransfer)
@@ -358,6 +541,7 @@ fun SettingsScreen(
 private const val BACKUP_MIME = "application/octet-stream"
 private const val BACKUP_EXTENSION = "tazbackup"
 private const val XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+private const val CSV_MIME = "text/csv"
 
 /** Opens the system file picker, or reports that the device has none. */
 private fun launchOrReport(onMessage: (String) -> Unit, launch: () -> Unit) {

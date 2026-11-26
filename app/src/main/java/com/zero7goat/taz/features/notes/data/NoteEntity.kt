@@ -1,5 +1,6 @@
 package com.zero7goat.taz.features.notes.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -36,5 +37,10 @@ data class NoteEntity(
     val isPinned: Boolean,
     val colorIndex: Int,
     /** When the note was moved to the trash (epoch ms), or null if it is not in the trash. */
-    val deletedAt: Long? = null
+    val deletedAt: Long? = null,
+    /** Asks for the passcode again before the note opens, even while TAZ is unlocked. */
+    @ColumnInfo(defaultValue = "0")
+    val isLocked: Boolean = false,
+    /** When to show a reminder notification for this note (epoch ms), or null for none. */
+    val remindAt: Long? = null
 )

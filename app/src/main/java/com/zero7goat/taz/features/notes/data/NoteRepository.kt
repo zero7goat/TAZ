@@ -20,7 +20,9 @@ class NoteRepository(
     private val images: NoteImageStore? = null,
     private val now: () -> Long = { System.currentTimeMillis() },
     /** Encrypts note custom fields. Without it, fields are neither read nor written. */
-    private val cipher: FieldCipher? = null
+    private val cipher: FieldCipher? = null,
+    /** Keeps earlier versions of notes. Without it, no history is written. */
+    private val history: NoteHistoryDao? = null
 ) {
 
     fun observeNotes(): Flow<List<NoteEntity>> = noteDao.observeAll()
@@ -38,7 +40,11 @@ class NoteRepository(
      */
     suspend fun save(note: NoteEntity, fields: List<CustomField>? = null): NoteEntity {
         val timestamp = now()
+        val previous = noteDao.getById(note.id)
         val toSave = note.copy(
+            // The extra lock and the reminder are changed only by their own setters.
+            isLocked = previous?.isLocked ?: note.isLocked,
+            remindAt = previous?.remindAt ?: note.remindAt,
             createdAt = if (note.createdAt == 0L) timestamp else note.createdAt,
             updatedAt = timestamp
         )
@@ -54,8 +60,51 @@ class NoteRepository(
             }
             noteDao.saveWithFields(toSave, blob?.let { NoteFieldsEntity(note.id, it) })
         }
+        if (previous != null) keepVersion(previous, toSave, timestamp)
         return toSave
     }
+
+    /**
+     * Keeps the text as it was before this save, when it changed. Notes save as you type, so a new
+     * version is kept at most every [VERSION_GAP_MS]; only the newest [MAX_VERSIONS] are kept.
+     */
+    private suspend fun keepVersion(previous: NoteEntity, saved: NoteEntity, timestamp: Long) {
+        val dao = history ?: return
+        val changed = previous.title != saved.title || previous.description != saved.description || previous.body != saved.body
+        if (!changed) return
+        if (previous.title.isBlank() && previous.description.isBlank() && previous.body.isBlank()) return
+        val last = dao.latestVersion(previous.id)
+        if (last != null && timestamp - last.savedAt < VERSION_GAP_MS) return
+        dao.insertVersion(
+            NoteVersionEntity(
+                id = java.util.UUID.randomUUID().toString(),
+                noteId = previous.id,
+                title = previous.title,
+                description = previous.description,
+                body = previous.body,
+                savedAt = timestamp
+            )
+        )
+        dao.trim(previous.id, MAX_VERSIONS)
+    }
+
+    fun observeVersions(noteId: String): Flow<List<NoteVersionEntity>> =
+        history?.observeVersions(noteId) ?: kotlinx.coroutines.flow.flowOf(emptyList())
+
+    suspend fun deleteVersion(id: String) = history?.deleteVersion(id)
+
+    suspend fun setLocked(id: String, locked: Boolean) = noteDao.setLocked(id, locked)
+
+    fun observeTemplates(): Flow<List<NoteTemplateEntity>> =
+        history?.observeTemplates() ?: kotlinx.coroutines.flow.flowOf(emptyList())
+
+    suspend fun saveTemplate(name: String, title: String, body: String) {
+        history?.upsertTemplate(NoteTemplateEntity(java.util.UUID.randomUUID().toString(), name.trim().take(60), title, body, now()))
+    }
+
+    suspend fun deleteTemplate(id: String) = history?.deleteTemplate(id)
+
+    suspend fun setReminder(id: String, remindAt: Long?) = noteDao.setRemindAt(id, remindAt)
 
     suspend fun loadFields(id: String): NoteFieldsLoad = withContext(Dispatchers.Default) {
         val stored = noteDao.getFields(id) ?: return@withContext NoteFieldsLoad.Ok(emptyList())
@@ -146,5 +195,8 @@ class NoteRepository(
         /** Binds a note's field blob to that note. */
         // DO NOT RENAME: existing user data depends on this exact value (see DataIdentityTest).
         fun fieldsAad(noteId: String) = "taz.note.v1|$noteId|fields"
+
+        const val VERSION_GAP_MS = 10 * 60 * 1000L
+        const val MAX_VERSIONS = 20
     }
 }

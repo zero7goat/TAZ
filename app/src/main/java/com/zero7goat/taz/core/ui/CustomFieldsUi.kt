@@ -68,6 +68,7 @@ fun FieldType.icon(): ImageVector = when (this) {
     FieldType.PHONE -> TazIcons.Phone
     FieldType.SECRET -> TazIcons.Key
     FieldType.TOGGLE -> TazIcons.Toggle
+    FieldType.TOTP -> TazIcons.Timer
 }
 
 /** A date stored as ISO text, shown in the device's format. Unparseable text is shown as it is. */
@@ -105,7 +106,10 @@ fun CustomFieldsView(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     style = MaterialTheme.typography.labelMedium
                 )
-                FieldSurface {
+                // A two-factor field shows its live code; only the code is ever copied.
+                if (field.type == FieldType.TOTP && field.value.isNotEmpty()) {
+                    TotpCodeView(field) { code -> onCopy(field.copy(value = code)) }
+                } else FieldSurface {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = displayValue(field, isRevealed).ifEmpty { "Not set" },
@@ -183,7 +187,14 @@ fun CustomFieldsEditor(
         }
         if (fields.size < CustomFields.MAX_FIELDS) {
             AddFieldButton(onAdd = { type ->
-                onChange(fields + CustomField(UUID.randomUUID().toString(), "", type, if (type == FieldType.TOGGLE) CustomFields.FALSE else ""))
+                onChange(
+                    fields + CustomField(
+                        UUID.randomUUID().toString(),
+                        if (type == FieldType.TOTP) "Two-factor code" else "",
+                        type,
+                        if (type == FieldType.TOGGLE) CustomFields.FALSE else ""
+                    )
+                )
             })
         }
     }
@@ -257,7 +268,7 @@ private fun FieldEditorCard(
                         leadingIcon = { Icon(TazIcons.Category, contentDescription = null) },
                         onClick = { menuOpen = false; typeMenuOpen = true }
                     )
-                    if (field.type != FieldType.SECRET && field.type != FieldType.TOGGLE) {
+                    if (field.type != FieldType.SECRET && field.type != FieldType.TOGGLE && field.type != FieldType.TOTP) {
                         DropdownMenuItem(
                             text = { Text(if (field.isHidden) "Show value normally" else "Hide value") },
                             leadingIcon = { Icon(if (field.isHidden) TazIcons.Eye else TazIcons.EyeOff, contentDescription = null) },
@@ -322,6 +333,7 @@ private fun FieldEditorCard(
                 text = when (field.type) {
                     FieldType.NUMBER -> "Enter digits only (for example 1234 or 12.5)."
                     FieldType.DATE -> "Pick a date."
+                    FieldType.TOTP -> "Enter a valid setup key (letters A to Z and digits 2 to 7) or scan the QR code."
                     else -> "This value doesn't fit the field type."
                 },
                 modifier = Modifier.padding(top = 4.dp),
@@ -342,6 +354,8 @@ private fun FieldValueInput(
     onGenerate: (() -> Unit)?
 ) {
     when (field.type) {
+        FieldType.TOTP -> TotpFieldInput(field, revealed, onChange, onToggleReveal)
+
         FieldType.TOGGLE -> FieldSurface {
             Row(
                 modifier = Modifier

@@ -1,6 +1,7 @@
 package com.zero7goat.taz.core.backup
 
 import com.zero7goat.taz.core.fields.CustomField
+import com.zero7goat.taz.features.passwords.domain.PasswordHistoryEntry
 
 /*
  * What a backup contains, independent of Room. Pure Kotlin so the format can be unit tested.
@@ -28,7 +29,10 @@ data class NoteRecord(
     val isPinned: Boolean,
     val colorIndex: Int,
     /** Decrypted custom fields (format version 2). Only ever in memory and in the encrypted stream. */
-    val fields: List<CustomField> = emptyList()
+    val fields: List<CustomField> = emptyList(),
+    /** Format version 3 (TAZ 2.0). */
+    val isLocked: Boolean = false,
+    val remindAt: Long? = null
 )
 
 class CredentialRecord(
@@ -43,7 +47,10 @@ class CredentialRecord(
     val createdAt: Long,
     val updatedAt: Long,
     val category: String = "login",
-    val fields: List<CustomField> = emptyList()
+    val fields: List<CustomField> = emptyList(),
+    /** Format version 3 (TAZ 2.0): earlier passwords, newest first. */
+    val history: List<PasswordHistoryEntry> = emptyList(),
+    val isLocked: Boolean = false
 ) {
     override fun toString(): String = "CredentialRecord(id=$id, secrets=hidden)"
 }
@@ -60,7 +67,9 @@ data class FileRecord(
     val description: String,
     val isFavorite: Boolean,
     val createdAt: Long,
-    val updatedAt: Long
+    val updatedAt: Long,
+    /** Format version 3 (TAZ 2.0). */
+    val isLocked: Boolean = false
 )
 
 /**
@@ -76,7 +85,10 @@ data class BackupContents(
     val settings: Map<String, String>,
     val tags: List<TagRecord> = emptyList(),
     val tagLinks: List<TagLinkRecord> = emptyList(),
-    val categories: List<CategoryRecord> = emptyList()
+    val categories: List<CategoryRecord> = emptyList(),
+    /** Format version 3 (TAZ 2.0): the user's note templates and which logins were picked for which apps. */
+    val noteTemplates: List<NoteTemplateRecord> = emptyList(),
+    val appLinks: List<AppLinkRecord> = emptyList()
 )
 
 /** A tag (format version 2). */
@@ -87,3 +99,9 @@ data class TagLinkRecord(val tagId: String, val itemType: String, val itemId: St
 
 /** A custom login category: name, icon and its field template (labels and types, no values). */
 data class CategoryRecord(val id: String, val name: String, val icon: String, val fieldsJson: String, val createdAt: Long)
+
+/** A note template the user made (format version 3). */
+data class NoteTemplateRecord(val id: String, val name: String, val title: String, val body: String, val createdAt: Long)
+
+/** An app a login was picked for in autofill (format version 3). */
+data class AppLinkRecord(val packageName: String, val credentialId: String, val createdAt: Long)

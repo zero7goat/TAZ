@@ -26,6 +26,19 @@ No account. No cloud. No tracking. Everything stays on your phone.
 
 > TAZ is not on the Play Store. You can verify the download with the SHA-256 checksum published in each release.
 
+## New in 2.0
+- **Autofill** in apps and browsers, with keyboard suggestions, remembered apps and two-factor codes filled in
+- **Two-factor codes (TOTP)**: scan a QR code, import from Google Authenticator, see all codes in one place
+- **Import** from Chrome, Firefox, Bitwarden, KeePass, 1Password, Proton Pass and Dashlane; **CSV export**
+- **Passkeys** on Android 14+ (experimental)
+- **Encrypted files**, photo location removed on import, per-item locks, duress passcode with a decoy vault, erase after wrong passcodes, lock on screen off, disguised app icon, Lock TAZ tile
+- **Password history**, passphrase and username generators, commonly-leaked check, duplicate finder and merge
+- **Automatic encrypted backups** to a folder you choose, and a printable emergency sheet
+- **Notes**: reminders, version history and templates; reminders for expiring cards and old passwords
+- **Capture into the vault**: photos, videos, document scans (PDF) and voice notes, plus a built-in media player
+- **Share a login by QR code** between two phones, a home-screen widget, tablet two-pane layout and wallpaper colours
+- Permissions: camera (QR codes, capture), microphone (voice notes, video) and notifications (reminders), each asked when first used. Still **no internet permission**
+
 ## Features
 
 ### 🔍 Search everything
@@ -53,7 +66,8 @@ No account. No cloud. No tracking. Everything stays on your phone.
 ### 🔑 Passwords
 - Store logins with service name, website, username, password and notes
 - **Categories**: Login, Wi-Fi, Bank account, Payment card, Identity document, Software license, Secure note and Other, each with suggested fields, plus **your own categories** (Settings → Login categories)
-- **Custom fields** of nine types: add, rename, reorder, change type (only when the value fits), hide, show with the eye icon, and copy each one. Sensitive fields are hidden by default, and the password generator works on any secret field
+- **Custom fields** of ten types: add, rename, reorder, change type (only when the value fits), hide, show with the eye icon, and copy each one. Sensitive fields are hidden by default, and the password generator works on any secret field
+- **Two-factor codes (TOTP)**: add a "Two-factor code" field and scan the site's QR code with the camera, read it from a screenshot, or paste the setup key. TAZ shows the live 6-digit code with a countdown, works with SHA-1/256/512, 6–8 digits and any period, and computes every code on the phone
 - Custom fields are encrypted with the same Keystore key as passwords and included in encrypted backups
 - Username, password and notes are **encrypted with AES-256-GCM**, with the key held in the **Android Keystore** and never leaving the device
 - Show or hide a password with the **eye icon** inside the field
@@ -79,8 +93,20 @@ No account. No cloud. No tracking. Everything stays on your phone.
 - **Auto-lock**: immediately, 30 s, 1 min, 5 min, 15 min, or only on restart
 - **Brute-force protection**: increasing lockout delays after repeated wrong passcodes
 - **Screenshot blocking** and a hidden preview in the recent-apps switcher
-- **No internet permission at all**: the app physically cannot send your data anywhere
+- **No internet permission at all**: the app physically cannot send your data anywhere. The only extra permission is the camera, asked for when you first scan a two-factor QR code
 - Forgotten your passcode? An explicit *erase everything* reset lets you start fresh (there is no backdoor)
+
+### 🪄 Autofill
+- Turn it on in **Settings → Autofill**: TAZ then fills usernames and passwords in other apps and in browsers
+- Logins are matched by website (same site only, so look-alike domains never match) or by the app's name; you can also search all logins
+- When TAZ is locked, tapping a suggestion opens TAZ's lock screen first, using the same auto-lock rules as the app
+- After a sign-in, Android offers to **save the new login** or **update a changed password** (the old one is kept in the login, just in case)
+- If the login has a two-factor field, the current code is copied for the next step
+
+### 🔁 Move logins in and out
+- **Import** from Chrome, Edge, Brave, Firefox, Bitwarden (CSV or unencrypted JSON), KeePass/KeePassXC, 1Password, Proton Pass, Dashlane and most other CSV files
+- See what was found before anything is saved; logins already in TAZ are skipped, and folders, favourites, tags and two-factor keys come along
+- **Export logins to CSV** in Bitwarden's layout, readable by most password managers. TAZ warns that the file isn't encrypted and asks for your passcode first
 
 ### 🗂️ Folders & selection
 - Create folders in one tap, including **nested folders**
@@ -123,6 +149,7 @@ No account. No cloud. No tracking. Everything stays on your phone.
 | Storage | Room (SQLite), DataStore |
 | Security | Android Keystore, AES-256-GCM, PBKDF2, BiometricPrompt |
 | Export | [fastexcel](https://github.com/dhatim/fastexcel) |
+| QR codes | CameraX, [ZXing](https://github.com/zxing/zxing) (both on the device) |
 | Build | Gradle (Kotlin DSL), KSP |
 
 ## Build from source

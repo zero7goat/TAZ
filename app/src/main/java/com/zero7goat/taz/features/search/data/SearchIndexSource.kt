@@ -91,22 +91,24 @@ class SearchIndexSource(private val database: TazDatabase, cipher: FieldCipher) 
 
         t.notes.forEach { note ->
             val itemTags = tagsOf(TagTarget.NOTE, note.id)
-            val body = IMAGE_REFERENCE.replace(note.body, "[image]")
+            // A note with its own lock is found by its title only.
+            val locked = note.isLocked
+            val body = if (locked) "" else IMAGE_REFERENCE.replace(note.body, "[image]")
             docs += SearchDoc(
                 type = ResultType.NOTE,
                 id = note.id,
                 title = note.title.ifBlank { "Untitled" },
                 fields = buildList {
-                    if (note.description.isNotBlank()) add(SearchField("Description", note.description))
+                    if (!locked && note.description.isNotBlank()) add(SearchField("Description", note.description))
                     if (body.isNotBlank()) add(SearchField("Text", body))
-                    addAll(fieldEntries(noteFields[note.id].orEmpty()))
+                    if (!locked) addAll(fieldEntries(noteFields[note.id].orEmpty()))
                 },
                 tagIds = itemTags.mapTo(HashSet()) { it.id },
                 tagNames = itemTags.map { it.name },
                 folderId = note.folderId,
                 isFavorite = note.isFavorite,
                 updatedAt = note.updatedAt,
-                summary = note.description.ifBlank { body.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty() }.take(120),
+                summary = if (locked) "Locked note" else note.description.ifBlank { body.lineSequence().firstOrNull { it.isNotBlank() }.orEmpty() }.take(120),
                 hint = note.colorIndex.toString()
             )
         }

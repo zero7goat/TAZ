@@ -1,5 +1,22 @@
 package com.zero7goat.taz.core.navigation
 
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
+import androidx.compose.runtime.produceState
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.zero7goat.taz.core.ui.WHATS_NEW_VERSION
+import com.zero7goat.taz.core.ui.WhatsNewScreen
+import com.zero7goat.taz.core.ui.WelcomeScreen
+import com.zero7goat.taz.core.database.TazDatabase
+import com.zero7goat.taz.core.AppContainer
+import com.zero7goat.taz.core.settings.FeaturePrefs
+import com.zero7goat.taz.features.passwords.presentation.CodesScreen
+import androidx.compose.runtime.key
+import androidx.compose.material3.VerticalDivider
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Row
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
@@ -87,9 +104,12 @@ private sealed interface Screen {
     data object Tags : Screen
     data object Categories : Screen
     data object Search : Screen
+    data object Codes : Screen
 }
 
 private val ContentMaxWidth = 720.dp
+private const val TWO_PANE_MIN_WIDTH_DP = 840
+private val LIST_PANE_WIDTH = 400.dp
 
 /**
  * The app shell: bottom navigation between the four top-level sections, with notes, logins and
@@ -114,7 +134,51 @@ fun AppNavigation(modifier: Modifier = Modifier) {
     var showCategories by rememberSaveable { mutableStateOf(false) }
     // Vault-wide search. Items opened from it come back to it when closed.
     var showSearch by rememberSaveable { mutableStateOf(false) }
+    var showCodes by rememberSaveable { mutableStateOf(false) }
     val shellStateHolder = rememberSaveableStateHolder()
+
+    // First start: a short welcome. After updating to 2.0: what is new, once.
+    val firstRunContext = LocalContext.current.applicationContext
+    val featurePrefs = remember(firstRunContext) { FeaturePrefs(firstRunContext) }
+    val features by featurePrefs.settings.collectAsStateWithLifecycle(null)
+    val hasPasscode by AppContainer.lockManager(firstRunContext).hasPasscode.collectAsStateWithLifecycle()
+    val vaultEmpty by produceState<Boolean?>(null) {
+        value = withContext(Dispatchers.IO) {
+            try {
+                TazDatabase.getInstance(firstRunContext).openHelper.readableDatabase.query(
+                    "SELECT (SELECT COUNT(*) FROM notes) + (SELECT COUNT(*) FROM credentials) + (SELECT COUNT(*) FROM files)"
+                ).use { c -> c.moveToFirst() && c.getLong(0) == 0L }
+            } catch (e: Exception) {
+                false
+            }
+        }
+    }
+    val firstRunScope = rememberCoroutineScope()
+    val loadedFeatures = features
+    if (loadedFeatures == null || vaultEmpty == null) {
+        Box(modifier.fillMaxSize())
+        return
+    }
+    val brandNew = vaultEmpty == true && !hasPasscode
+    if (!loadedFeatures.onboardingDone && brandNew && loadedFeatures.lastSeenVersion == 0) {
+        WelcomeScreen { setUpLock ->
+            firstRunScope.launch {
+                featurePrefs.setLastSeenVersion(WHATS_NEW_VERSION)
+                featurePrefs.setOnboardingDone()
+            }
+            if (setUpLock) currentPath = Route.Settings.path
+        }
+        return
+    }
+    if (loadedFeatures.lastSeenVersion < WHATS_NEW_VERSION && !brandNew) {
+        WhatsNewScreen {
+            firstRunScope.launch {
+                featurePrefs.setLastSeenVersion(WHATS_NEW_VERSION)
+                featurePrefs.setOnboardingDone()
+            }
+        }
+        return
+    }
 
     // The home-screen "New note" shortcut. This composable only exists once TAZ is unlocked, so the
     // new note opens after the passcode (or biometric) check, never before it.
@@ -130,6 +194,20 @@ fun AppNavigation(modifier: Modifier = Modifier) {
                 editingNoteId = UUID.randomUUID().toString()
             }
             AppShortcuts.clearNewNote()
+        }
+    }
+
+    // The widget's "2FA codes" button, likewise only after unlocking.
+    val codesRequestedAt by AppShortcuts.codesRequestedAt.collectAsState()
+    LaunchedEffect(codesRequestedAt) {
+        if (codesRequestedAt != 0L) {
+            if (AppShortcuts.isFresh(codesRequestedAt, System.currentTimeMillis())) {
+                editingNoteId = null
+                editingCredentialId = null
+                viewingFileId = null
+                showCodes = true
+            }
+            AppShortcuts.clearCodes()
         }
     }
 
@@ -160,7 +238,45 @@ fun AppNavigation(modifier: Modifier = Modifier) {
         showTrash -> Screen.Trash
         showTags -> Screen.Tags
         showCategories -> Screen.Categories
+        showCodes -> Screen.Codes
         else -> Screen.Shell
+    }
+
+    val shellContent: @Composable () -> Unit = {
+        ShellContent(
+            shellStateHolder = shellStateHolder,
+            snackbarHostState = snackbarHostState,
+            currentRoute = currentRoute,
+            onSelectRoute = { currentPath = it.path },
+            onOpenSearch = { showSearch = true },
+            onOpenNote = { editingNoteId = it },
+            onOpenCredential = { editingCredentialId = it },
+            onOpenFile = { viewingFileId = it },
+            onOpenHealth = { showPasswordHealth = true },
+            onOpenTrash = { showTrash = true },
+            onOpenTags = { showTags = true },
+            onOpenCategories = { showCategories = true },
+            onOpenCodes = { showCodes = true },
+            showMessage = showMessage
+        )
+    }
+
+    // Tablets and wide landscape screens: the open note, login or file sits next to the list.
+    val wide = LocalConfiguration.current.screenWidthDp >= TWO_PANE_MIN_WIDTH_DP
+    if (wide && screen.depth == 2) {
+        Row(modifier.fillMaxSize()) {
+            Box(Modifier.width(LIST_PANE_WIDTH).fillMaxHeight()) { shellContent() }
+            VerticalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Box(Modifier.weight(1f).fillMaxHeight()) {
+                when (screen) {
+                    is Screen.NoteEditor -> key(screen.id) { ContentFrame { NoteEditorScreen(noteId = screen.id, onClose = { editingNoteId = null }, modifier = Modifier.fillMaxSize()) } }
+                    is Screen.PasswordEditor -> key(screen.id) { ContentFrame { PasswordEditorScreen(credentialId = screen.id, onClose = { editingCredentialId = null }, modifier = Modifier.fillMaxSize()) } }
+                    is Screen.FileViewer -> key(screen.id) { ContentFrame { FileDetailScreen(fileId = screen.id, onClose = { viewingFileId = null }, modifier = Modifier.fillMaxSize()) } }
+                    else -> Unit
+                }
+            }
+        }
+        return
     }
 
     AnimatedContent(
@@ -243,17 +359,46 @@ fun AppNavigation(modifier: Modifier = Modifier) {
             Screen.Categories -> ContentFrame {
                 CategoriesScreen(onClose = { showCategories = false }, modifier = Modifier.fillMaxSize())
             }
-            Screen.Shell -> {
+            Screen.Shell -> shellContent()
+            Screen.Codes -> ContentFrame {
+                CodesScreen(
+                    onClose = { showCodes = false },
+                    onOpenLogin = { editingCredentialId = it },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+    }
+}
+
+/** The bottom-navigation shell with the four lists. */
+@Composable
+private fun ShellContent(
+    shellStateHolder: androidx.compose.runtime.saveable.SaveableStateHolder,
+    snackbarHostState: SnackbarHostState,
+    currentRoute: Route,
+    onSelectRoute: (Route) -> Unit,
+    onOpenSearch: () -> Unit,
+    onOpenNote: (String) -> Unit,
+    onOpenCredential: (String) -> Unit,
+    onOpenFile: (String) -> Unit,
+    onOpenHealth: () -> Unit,
+    onOpenTrash: () -> Unit,
+    onOpenTags: () -> Unit,
+    onOpenCategories: () -> Unit,
+    onOpenCodes: () -> Unit,
+    showMessage: (String) -> Unit
+) {
                 // Keeps list scroll position and search text while an editor is open.
                 shellStateHolder.SaveableStateProvider("shell") {
-                    CompositionLocalProvider(LocalOpenSearch provides { showSearch = true }) {
+                    CompositionLocalProvider(LocalOpenSearch provides onOpenSearch) {
                     Scaffold(
                         modifier = Modifier.fillMaxSize(),
                         snackbarHost = { SnackbarHost(snackbarHostState) },
                         bottomBar = {
                             TazBottomBar(
                                 current = currentRoute,
-                                onSelect = { currentPath = it.path }
+                                onSelect = onSelectRoute
                             )
                         }
                     ) { innerPadding ->
@@ -263,25 +408,26 @@ fun AppNavigation(modifier: Modifier = Modifier) {
                                     val screenModifier = Modifier.fillMaxSize()
                                     when (route) {
                                         Route.Notes -> NotesScreen(
-                                            onOpenNote = { editingNoteId = it },
+                                            onOpenNote = onOpenNote,
                                             modifier = screenModifier
                                         )
                                         Route.Passwords -> PasswordsScreen(
-                                            onOpenCredential = { editingCredentialId = it },
-                                            onOpenHealth = { showPasswordHealth = true },
+                                            onOpenCredential = onOpenCredential,
+                                            onOpenHealth = onOpenHealth,
                                             modifier = screenModifier
                                         )
                                         Route.Files -> FilesScreen(
-                                            onOpenFile = { viewingFileId = it },
+                                            onOpenFile = onOpenFile,
                                             onMessage = showMessage,
                                             modifier = screenModifier
                                         )
                                         Route.Settings -> SettingsScreen(
                                             onMessage = showMessage,
-                                            onOpenTrash = { showTrash = true },
-                                            onOpenPasswordHealth = { showPasswordHealth = true },
-                                            onOpenTags = { showTags = true },
-                                            onOpenCategories = { showCategories = true },
+                                            onOpenTrash = onOpenTrash,
+                                            onOpenPasswordHealth = onOpenHealth,
+                                            onOpenTags = onOpenTags,
+                                            onOpenCategories = onOpenCategories,
+                                            onOpenCodes = onOpenCodes,
                                             modifier = screenModifier
                                         )
                                     }
@@ -291,16 +437,13 @@ fun AppNavigation(modifier: Modifier = Modifier) {
                     }
                     }
                 }
-            }
-        }
-    }
 }
 
 /** How deep a screen sits: lists, then tools and search, then a single item. Decides the transition direction. */
 private val Screen.depth: Int
     get() = when (this) {
         Screen.Shell -> 0
-        Screen.Search, Screen.Trash, Screen.PasswordHealth, Screen.Tags, Screen.Categories -> 1
+        Screen.Search, Screen.Trash, Screen.PasswordHealth, Screen.Tags, Screen.Categories, Screen.Codes -> 1
         is Screen.NoteEditor, is Screen.PasswordEditor, is Screen.FileViewer -> 2
     }
 

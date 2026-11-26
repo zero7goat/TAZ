@@ -177,7 +177,8 @@ private fun ColorScheme.animated(): ColorScheme = copy(
 )
 
 /**
- * TAZ theme. Uses the app's own palettes only; Material dynamic color is intentionally not used.
+ * TAZ theme. Uses the app's own palettes, or (when [dynamicColor] is on, Android 12+) the colours
+ * Android derives from the wallpaper. AMOLED keeps its true-black background either way.
  *
  * @param themeMode the saved appearance setting. Defaults to following the system.
  * @param fontFamily the saved font, applied across the whole type scale. Defaults to the system font.
@@ -186,6 +187,7 @@ private fun ColorScheme.animated(): ColorScheme = copy(
 fun TAZTheme(
     themeMode: ThemeMode = ThemeMode.SYSTEM,
     fontFamily: FontFamily = FontFamily.Default,
+    dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
     val systemDark = isSystemInDarkTheme()
@@ -196,7 +198,18 @@ fun TAZTheme(
         ThemeMode.DARK -> DarkColorScheme
         ThemeMode.AMOLED -> AmoledColorScheme
     }
-    val colorScheme = target.animated()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val chosen = if (dynamicColor && android.os.Build.VERSION.SDK_INT >= 31) {
+        when {
+            themeMode == ThemeMode.AMOLED -> androidx.compose.material3.dynamicDarkColorScheme(context)
+                .copy(background = AmoledColorScheme.background, surface = AmoledColorScheme.surface)
+            isDark -> androidx.compose.material3.dynamicDarkColorScheme(context)
+            else -> androidx.compose.material3.dynamicLightColorScheme(context)
+        }
+    } else {
+        target
+    }
+    val colorScheme = chosen.animated()
     val typography = remember(fontFamily) { tazTypography(fontFamily) }
 
     CompositionLocalProvider(LocalDarkTheme provides isDark) {

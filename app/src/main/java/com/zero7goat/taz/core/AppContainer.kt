@@ -1,9 +1,15 @@
 package com.zero7goat.taz.core
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import androidx.core.content.ContextCompat
 import com.zero7goat.taz.core.security.AppLockManager
+import com.zero7goat.taz.core.security.AppReset
 import com.zero7goat.taz.core.security.ClipboardGuard
 import com.zero7goat.taz.core.security.PasscodeStore
+import com.zero7goat.taz.core.settings.FeaturePrefs
 import com.zero7goat.taz.core.settings.SettingsDataStore
 import com.zero7goat.taz.core.settings.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
@@ -26,6 +32,9 @@ object AppContainer {
     @Volatile
     private var lockManager: AppLockManager? = null
 
+    @Volatile
+    private var lockOnScreenOff = false
+
     fun settings(context: Context): SettingsRepository =
         settingsRepository ?: synchronized(lock) {
             settingsRepository ?: SettingsRepository(SettingsDataStore(context.applicationContext)).also { repository ->
@@ -39,10 +48,34 @@ object AppContainer {
 
     fun lockManager(context: Context): AppLockManager =
         lockManager ?: synchronized(lock) {
-            lockManager ?: AppLockManager(
-                store = PasscodeStore(context.applicationContext),
-                settings = settings(context),
-                scope = appScope
-            ).also { lockManager = it }
+            lockManager ?: run {
+                val app = context.applicationContext
+                val features = FeaturePrefs(app)
+                AppLockManager(
+                    store = PasscodeStore(app),
+                    settings = settings(app),
+                    scope = appScope,
+                    wipeAfterAttempts = { features.current().wipeAfterAttempts },
+                    onWipe = {
+                        // "Erase after too many wrong passcodes": everything goes, then TAZ starts empty.
+                        AppReset.eraseEverything(app)
+                        AppReset.restart(app)
+                    }
+                ).also { manager ->
+                    lockManager = manager
+                    watchScreenOff(app, manager, features)
+                }
+            }
         }
+
+    /** Locks TAZ the moment the screen turns off, when that option is on. */
+    private fun watchScreenOff(app: Context, manager: AppLockManager, features: FeaturePrefs) {
+        appScope.launch { features.settings.collect { lockOnScreenOff = it.lockOnScreenOff } }
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                if (intent.action == Intent.ACTION_SCREEN_OFF && lockOnScreenOff) manager.lockNow()
+            }
+        }
+        ContextCompat.registerReceiver(app, receiver, IntentFilter(Intent.ACTION_SCREEN_OFF), ContextCompat.RECEIVER_NOT_EXPORTED)
+    }
 }

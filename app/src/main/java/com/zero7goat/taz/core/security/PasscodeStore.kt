@@ -85,6 +85,43 @@ class PasscodeStore(
         dataStore.edit { it.clear() }
     }
 
+    // ---------- duress passcode (opens the decoy vault) ----------
+
+    /** True while a duress passcode is set. */
+    val hasDuress: Flow<Boolean> = data.map { it[KEY_DURESS_HASH] != null }.distinctUntilChanged()
+
+    suspend fun loadDuress(): Loaded {
+        val prefs = data.first()
+        val hashText = prefs[KEY_DURESS_HASH] ?: return Loaded.None
+        val saltText = prefs[KEY_DURESS_SALT] ?: return Loaded.Unreadable
+        val iterations = prefs[KEY_DURESS_ITERATIONS] ?: return Loaded.Unreadable
+        return try {
+            val decoder = Base64.getDecoder()
+            val hashBase64 = cipher.decrypt(decoder.decode(hashText), DURESS_AAD)
+            Loaded.Present(decoder.decode(saltText), iterations, decoder.decode(hashBase64))
+        } catch (e: Exception) {
+            Loaded.Unreadable
+        }
+    }
+
+    suspend fun saveDuress(salt: ByteArray, iterations: Int, hash: ByteArray) {
+        val encoder = Base64.getEncoder()
+        val wrapped = cipher.encrypt(encoder.encodeToString(hash), DURESS_AAD)
+        dataStore.edit { prefs ->
+            prefs[KEY_DURESS_SALT] = encoder.encodeToString(salt)
+            prefs[KEY_DURESS_ITERATIONS] = iterations
+            prefs[KEY_DURESS_HASH] = encoder.encodeToString(wrapped)
+        }
+    }
+
+    suspend fun clearDuress() {
+        dataStore.edit { prefs ->
+            prefs.remove(KEY_DURESS_SALT)
+            prefs.remove(KEY_DURESS_ITERATIONS)
+            prefs.remove(KEY_DURESS_HASH)
+        }
+    }
+
     suspend fun readFailures(): Failures {
         val prefs = data.first()
         return Failures(prefs[KEY_FAILED] ?: 0, prefs[KEY_LOCKED_UNTIL] ?: 0L)
@@ -105,5 +142,9 @@ class PasscodeStore(
         val KEY_HASH = stringPreferencesKey("passcode_hash")
         val KEY_FAILED = intPreferencesKey("failed_attempts")
         val KEY_LOCKED_UNTIL = longPreferencesKey("locked_until")
+        const val DURESS_AAD = "taz.duress.v1"
+        val KEY_DURESS_SALT = stringPreferencesKey("duress_salt")
+        val KEY_DURESS_ITERATIONS = intPreferencesKey("duress_iterations")
+        val KEY_DURESS_HASH = stringPreferencesKey("duress_hash")
     }
 }

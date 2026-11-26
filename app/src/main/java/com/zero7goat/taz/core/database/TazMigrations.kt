@@ -151,7 +151,46 @@ object TazMigrations {
         }
     }
 
+
+    /**
+     * Version 8 (TAZ 2.0). Only adds: four new, empty tables and new columns with safe defaults.
+     * Every existing login, note and file keeps its data exactly; none is read, changed or
+     * re-encrypted here. Files are encrypted later, one at a time, by VaultFileMigrator, which can be
+     * interrupted safely. Room runs this inside one transaction: if any statement fails nothing is
+     * applied and the version stays 7.
+     */
+    val MIGRATION_7_8_SQL: List<String> = listOf(
+        "CREATE TABLE IF NOT EXISTS `app_links` (`packageName` TEXT NOT NULL, `credentialId` TEXT NOT NULL, " +
+            "`createdAt` INTEGER NOT NULL, PRIMARY KEY(`packageName`, `credentialId`), " +
+            "FOREIGN KEY(`credentialId`) REFERENCES `credentials`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "CREATE INDEX IF NOT EXISTS `index_app_links_credentialId` ON `app_links` (`credentialId`)",
+        "CREATE TABLE IF NOT EXISTS `note_versions` (`id` TEXT NOT NULL, `noteId` TEXT NOT NULL, " +
+            "`title` TEXT NOT NULL, `description` TEXT NOT NULL, `body` TEXT NOT NULL, `savedAt` INTEGER NOT NULL, " +
+            "PRIMARY KEY(`id`), FOREIGN KEY(`noteId`) REFERENCES `notes`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE )",
+        "CREATE INDEX IF NOT EXISTS `index_note_versions_noteId` ON `note_versions` (`noteId`)",
+        "CREATE TABLE IF NOT EXISTS `note_templates` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, " +
+            "`title` TEXT NOT NULL, `body` TEXT NOT NULL, `createdAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "ALTER TABLE `credentials` ADD COLUMN `historyCipher` BLOB",
+        "ALTER TABLE `credentials` ADD COLUMN `isLocked` INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE `notes` ADD COLUMN `isLocked` INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE `notes` ADD COLUMN `remindAt` INTEGER",
+        "ALTER TABLE `files` ADD COLUMN `isLocked` INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE `files` ADD COLUMN `encryption` INTEGER NOT NULL DEFAULT 0",
+        "CREATE TABLE IF NOT EXISTS `passkeys` (`id` TEXT NOT NULL, `credentialId` TEXT NOT NULL, `rpId` TEXT NOT NULL, " +
+            "`userName` TEXT NOT NULL, `userDisplayName` TEXT NOT NULL, `userHandle` TEXT NOT NULL, `privateKeyCipher` BLOB NOT NULL, " +
+            "`signCount` INTEGER NOT NULL, `createdAt` INTEGER NOT NULL, `lastUsedAt` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "CREATE UNIQUE INDEX IF NOT EXISTS `index_passkeys_credentialId` ON `passkeys` (`credentialId`)",
+        "CREATE INDEX IF NOT EXISTS `index_passkeys_rpId` ON `passkeys` (`rpId`)"
+    )
+
+    val MIGRATION_7_8: Migration = object : Migration(7, 8) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            MIGRATION_7_8_SQL.forEach { db.execSQL(it) }
+        }
+    }
+
     val ALL: Array<Migration> = arrayOf(
-        MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7
+        MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
+        MIGRATION_7_8
     )
 }

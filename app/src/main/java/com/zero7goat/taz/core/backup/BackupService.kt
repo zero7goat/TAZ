@@ -1,5 +1,9 @@
 package com.zero7goat.taz.core.backup
 
+import com.zero7goat.taz.features.autofill.AppLinkEntity
+import com.zero7goat.taz.features.notes.data.NoteTemplateEntity
+import com.zero7goat.taz.core.storage.VaultFileCipher
+import com.zero7goat.taz.core.storage.VaultPaths
 import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
@@ -69,9 +73,10 @@ class BackupService(
     private val settings: SettingsRepository,
     private val kdfIterations: Int = BackupHeader.DEFAULT_ITERATIONS
 ) {
-    private val filesDir = context.applicationContext.filesDir
+    private val filesDir = VaultPaths.root(context)
     private val vault = VaultFileStore(filesDir)
     private val noteImages = NoteImageStore(filesDir)
+    private val fileCipher = VaultFileCipher(cipher)
     private val committer = RestoreCommitter(filesDir)
     private val credentials = CredentialRepository(database.credentialDao(), cipher)
     private val notes = NoteRepository(database.noteDao(), cipher = cipher)
@@ -108,7 +113,9 @@ class BackupService(
                     files = database.fileDao().getAllActive(),
                     tags = database.tagDao().getAll(),
                     tagLinks = database.tagDao().getAllLinks(),
-                    categories = database.categoryDao().getAll()
+                    categories = database.categoryDao().getAll(),
+                    templates = database.noteHistoryDao().getAllTemplates(),
+                    appLinks = database.appLinkDao().getAll()
                 )
             }
             val scope = currentCoroutineContext()
@@ -133,7 +140,15 @@ class BackupService(
                         fileBlob = { record -> vault.resolve(vault.relativePathFor(record.id)) },
                         noteImage = { name -> noteImages.resolve(name) },
                         createdAt = System.currentTimeMillis(),
-                        skippedLogins = unreadable
+                        skippedLogins = unreadable,
+                        // Stored files are encrypted with this phone's key; backups carry their contents
+                        // (protected by the backup passphrase instead), so they restore anywhere.
+                        openBlob = { path, file ->
+                            if (path.startsWith(BackupPaths.FILE_BLOB_PREFIX)) fileCipher.open(file, path.removePrefix(BackupPaths.FILE_BLOB_PREFIX)) else file.inputStream()
+                        },
+                        blobSize = { path, file ->
+                            if (path.startsWith(BackupPaths.FILE_BLOB_PREFIX)) fileCipher.plainLength(file) else file.length()
+                        }
                     )
                     encrypted.close() // writes the authenticated last chunk only after a complete archive
                     summary
@@ -158,7 +173,9 @@ class BackupService(
         val files: List<FileEntity>,
         val tags: List<TagEntity>,
         val tagLinks: List<ItemTagEntity>,
-        val categories: List<CategoryEntity>
+        val categories: List<CategoryEntity>,
+        val templates: List<NoteTemplateEntity>,
+        val appLinks: List<AppLinkEntity>
     )
 
     private fun toContents(
@@ -180,7 +197,8 @@ class BackupService(
                     id = it.id, folderId = folderIn(it.folderId, "NOTES"), title = it.title,
                     description = it.description, body = it.body, createdAt = it.createdAt,
                     updatedAt = it.updatedAt, isFavorite = it.isFavorite, isPinned = it.isPinned,
-                    colorIndex = it.colorIndex, fields = noteFields[it.id].orEmpty()
+                    colorIndex = it.colorIndex, fields = noteFields[it.id].orEmpty(),
+                    isLocked = it.isLocked, remindAt = it.remindAt
                 )
             },
             credentials = logins.map {
@@ -188,7 +206,8 @@ class BackupService(
                     id = it.id, folderId = folderIn(it.folderId, "PASSWORDS"), serviceName = it.serviceName,
                     websiteUrl = it.websiteUrl, username = it.username, password = it.password,
                     notes = it.notes, isFavorite = it.isFavorite, createdAt = it.createdAt,
-                    updatedAt = it.updatedAt, category = it.category, fields = it.fields
+                    updatedAt = it.updatedAt, category = it.category, fields = it.fields,
+                    history = it.history, isLocked = it.isLocked
                 )
             },
             tags = snapshot.tags.map { TagRecord(it.id, it.name, it.createdAt) },
@@ -208,10 +227,15 @@ class BackupService(
                     id = it.id, folderId = folderIn(it.folderId, "FILES"), originalName = it.originalName,
                     displayName = it.displayName, mimeType = it.mimeType, sizeBytes = it.sizeBytes,
                     keywords = it.keywords, description = it.description, isFavorite = it.isFavorite,
-                    createdAt = it.createdAt, updatedAt = it.updatedAt
+                    createdAt = it.createdAt, updatedAt = it.updatedAt, isLocked = it.isLocked
                 )
             },
-            settings = prefs
+            settings = prefs,
+            noteTemplates = snapshot.templates.map { NoteTemplateRecord(it.id, it.name, it.title, it.body, it.createdAt) },
+            appLinks = run {
+                val active = logins.mapTo(HashSet()) { it.id }
+                snapshot.appLinks.filter { it.credentialId in active }.map { AppLinkRecord(it.packageName, it.credentialId, it.createdAt) }
+            }
         )
     }
 
@@ -303,6 +327,7 @@ class BackupService(
                         database.tagDao().deleteAllLinks()
                         database.tagDao().deleteAll()
                         database.categoryDao().deleteAll()
+                        database.noteHistoryDao().deleteAllTemplates()
                         database.noteDao().deleteAll() // note fields go with their notes (cascade)
                         database.credentialDao().deleteAll()
                         database.fileDao().deleteAll()
@@ -313,6 +338,8 @@ class BackupService(
                         database.noteDao().insertAll(contents.notes.map { it.toEntity() })
                         database.noteDao().insertAllFields(noteFieldEntities)
                         database.credentialDao().insertAll(entities)
+                        database.appLinkDao().let { dao -> contents.appLinks.forEach { dao.upsert(AppLinkEntity(it.packageName, it.credentialId, it.createdAt)) } }
+                        contents.noteTemplates.forEach { database.noteHistoryDao().upsertTemplate(NoteTemplateEntity(it.id, it.name, it.title, it.body, it.createdAt)) }
                         database.fileDao().insertAll(contents.files.map { it.toEntity(vault) })
                         database.categoryDao().insertAll(contents.categories.map {
                             CategoryEntity(it.id, it.name, it.icon, it.fieldsJson, it.createdAt)
@@ -415,18 +442,20 @@ class BackupService(
 private fun CredentialRecord.toDetail() = CredentialDetail(
     id = id, folderId = folderId, serviceName = serviceName, username = username, password = password,
     websiteUrl = websiteUrl, notes = notes, isFavorite = isFavorite, createdAt = createdAt, updatedAt = updatedAt,
-    category = category, fields = fields
+    category = category, fields = fields, history = history, isLocked = isLocked
 )
 
 private fun NoteRecord.toEntity() = NoteEntity(
     id = id, folderId = folderId, title = title, description = description, body = body,
     createdAt = createdAt, updatedAt = updatedAt, isFavorite = isFavorite, isPinned = isPinned,
-    colorIndex = colorIndex
+    colorIndex = colorIndex, isLocked = isLocked, remindAt = remindAt
 )
 
 /** The stored path is always rebuilt from the id, never taken from the backup. */
 private fun FileRecord.toEntity(vault: VaultFileStore) = FileEntity(
     id = id, folderId = folderId, originalName = originalName, displayName = displayName,
     mimeType = mimeType, sizeBytes = sizeBytes, storedPath = vault.relativePathFor(id), keywords = keywords,
-    description = description, isFavorite = isFavorite, createdAt = createdAt, updatedAt = updatedAt
+    description = description, isFavorite = isFavorite, createdAt = createdAt, updatedAt = updatedAt,
+    // Restored copies are plain until VaultFileMigrator encrypts them in the background.
+    isLocked = isLocked
 )

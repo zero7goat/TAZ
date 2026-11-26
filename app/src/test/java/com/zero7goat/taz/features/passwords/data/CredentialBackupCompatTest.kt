@@ -30,6 +30,12 @@ class CredentialBackupCompatTest {
         override suspend fun deleteById(id: String) { rows.remove(id) }
         override suspend fun setFavorite(id: String, isFavorite: Boolean) = Unit
         override suspend fun setFolder(id: String, folderId: String?) = Unit
+        override suspend fun setLocked(id: String, locked: Boolean) {
+            rows[id]?.let { rows[id] = it.copy(isLocked = locked) }
+        }
+        override suspend fun clearHistory(id: String) {
+            rows[id]?.let { rows[id] = it.copy(historyCipher = null) }
+        }
         override suspend fun getAll() = rows.values.toList()
         override suspend fun getAllActive() = rows.values.filter { it.deletedAt == null }
         override suspend fun moveToTrash(id: String, deletedAt: Long) {

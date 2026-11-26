@@ -13,7 +13,7 @@
         android:shortcutLongLabel="@string/shortcut_new_note_long">
         <intent
             android:action="com.zero7goat.taz.action.NEW_NOTE"
-            android:targetClass="com.zero7goat.taz.MainActivity"
+            android:targetClass="com.zero7goat.taz.TazActivity"
             android:targetPackage="com.zero7goat.taz" />
     </shortcut>
 </shortcuts>

@@ -9,7 +9,12 @@ import com.zero7goat.taz.core.security.KeystoreFieldCipher
 import com.zero7goat.taz.features.passwords.data.CredentialRepository
 import com.zero7goat.taz.features.passwords.domain.HealthInput
 import com.zero7goat.taz.features.passwords.domain.HealthReport
+import com.zero7goat.taz.features.passwords.domain.ReusedGroup
+import com.zero7goat.taz.core.tags.TagRepository
+import com.zero7goat.taz.core.tags.TagTarget
+import kotlinx.coroutines.flow.first
 import com.zero7goat.taz.features.passwords.domain.PasswordHealth
+import com.zero7goat.taz.features.passwords.domain.extractDomain
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -27,7 +32,26 @@ sealed interface HealthState {
  * Runs the password health check. Passwords are decrypted only for the duration of the check, on
  * the device, and only names and ids are kept in the result.
  */
-class PasswordHealthViewModel(private val repository: CredentialRepository) : ViewModel() {
+class PasswordHealthViewModel(
+    private val repository: CredentialRepository,
+    private val tags: TagRepository
+) : ViewModel() {
+
+    /** Merges a group of duplicate logins (see CredentialRepository.merge), keeping all their tags. */
+    fun merge(group: ReusedGroup, onDone: (String?) -> Unit) {
+        viewModelScope.launch {
+            val ids = group.logins.map { it.id }
+            val tagIds = ids.flatMap { id -> tags.observeItemTags(TagTarget.LOGIN, id).first().map { it.id } }.distinct()
+            val kept = try {
+                repository.merge(ids)
+            } catch (e: Exception) {
+                null
+            }
+            if (kept != null && tagIds.isNotEmpty()) tags.addTags(TagTarget.LOGIN, listOf(kept), tagIds)
+            onDone(kept)
+            refresh()
+        }
+    }
 
     private val _state = MutableStateFlow<HealthState>(HealthState.Loading)
     val state: StateFlow<HealthState> = _state.asStateFlow()
@@ -44,7 +68,7 @@ class PasswordHealthViewModel(private val repository: CredentialRepository) : Vi
                 val report = withContext(Dispatchers.Default) {
                     // Entries without a password (Wi-Fi, cards, notes ... stored in fields) are not checked.
                     val inputs = details.filter { it.password.isNotEmpty() }
-                        .map { HealthInput(it.id, it.serviceName, it.password, it.updatedAt) }
+                        .map { HealthInput(it.id, it.serviceName, it.password, it.updatedAt, it.username, extractDomain(it.websiteUrl)) }
                     PasswordHealth.analyze(inputs, System.currentTimeMillis(), unreadable)
                 }
                 HealthState.Ready(report)
@@ -62,7 +86,8 @@ class PasswordHealthViewModel(private val repository: CredentialRepository) : Vi
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
                     val database = TazDatabase.getInstance(appContext)
                     return PasswordHealthViewModel(
-                        CredentialRepository(database.credentialDao(), KeystoreFieldCipher())
+                        CredentialRepository(database.credentialDao(), KeystoreFieldCipher()),
+                        TagRepository(database.tagDao())
                     ) as T
                 }
             }

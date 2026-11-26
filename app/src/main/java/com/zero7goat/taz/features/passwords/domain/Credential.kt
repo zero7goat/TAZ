@@ -11,7 +11,8 @@ data class CredentialListItem(
     val domain: String,
     val username: String,
     val isFavorite: Boolean,
-    val category: String = Categories.LOGIN.key
+    val category: String = Categories.LOGIN.key,
+    val isLocked: Boolean = false
 )
 
 /** A fully decrypted login. [toString] hides secrets so accidental logging cannot leak them. */
@@ -27,7 +28,11 @@ data class CredentialDetail(
     val createdAt: Long,
     val updatedAt: Long,
     val category: String = Categories.LOGIN.key,
-    val fields: List<CustomField> = emptyList()
+    val fields: List<CustomField> = emptyList(),
+    /** Earlier passwords, newest first. */
+    val history: List<PasswordHistoryEntry> = emptyList(),
+    /** Asks for the passcode again before it opens. */
+    val isLocked: Boolean = false
 ) {
     override fun toString(): String = "CredentialDetail(id=$id, secrets=hidden)"
 }
@@ -44,7 +49,8 @@ data class CredentialInput(
     val isFavorite: Boolean,
     val createdAt: Long,
     val category: String = Categories.LOGIN.key,
-    val fields: List<CustomField> = emptyList()
+    val fields: List<CustomField> = emptyList(),
+    val isLocked: Boolean = false
 ) {
     override fun toString(): String = "CredentialInput(id=$id, secrets=hidden)"
 }

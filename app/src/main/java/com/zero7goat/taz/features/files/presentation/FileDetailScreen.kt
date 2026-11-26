@@ -1,5 +1,8 @@
 package com.zero7goat.taz.features.files.presentation
 
+import com.zero7goat.taz.core.AppContainer
+import com.zero7goat.taz.core.ui.ItemLockGate
+import com.zero7goat.taz.core.ui.itemLockKey
 import androidx.activity.compose.BackHandler
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -50,6 +53,7 @@ import com.zero7goat.taz.core.ui.TazIcons
 import com.zero7goat.taz.core.ui.AnimatedIcon
 import com.zero7goat.taz.features.files.data.FileEntity
 import com.zero7goat.taz.features.files.domain.fileCategory
+import com.zero7goat.taz.features.files.domain.FileCategory
 import com.zero7goat.taz.features.files.domain.formatFileSize
 import com.zero7goat.taz.features.files.domain.keywordList
 import java.time.Instant
@@ -82,7 +86,10 @@ fun FileDetailScreen(fileId: String, onClose: () -> Unit, modifier: Modifier = M
         when {
             current == null -> BackHandler(onBack = onClose) // still loading
             file == null -> LaunchedEffect(fileId) { onClose() } // deleted or never existed
-            else -> DetailContent(file = file, viewModel = viewModel, onClose = onClose)
+            // A file with its own lock asks for the passcode again before it is shown.
+            else -> ItemLockGate(locked = file.isLocked, itemKey = itemLockKey("FILE", file.id), title = file.displayName) {
+                DetailContent(file = file, viewModel = viewModel, onClose = onClose)
+            }
         }
     }
 }
@@ -95,6 +102,7 @@ private fun DetailContent(file: FileEntity, viewModel: FilesViewModel, onClose: 
     val preview by rememberPreviewState(file, viewModel::resolveBlob)
     var showEdit by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
+    val appLockOn by AppContainer.lockManager(context).hasPasscode.collectAsStateWithLifecycle()
     val pageWidthPx = context.resources.displayMetrics.widthPixels
     val isMissing = preview is PreviewState.Missing
 
@@ -116,6 +124,13 @@ private fun DetailContent(file: FileEntity, viewModel: FilesViewModel, onClose: 
     // The full-screen viewer (images, PDF, text). Saved so rotation keeps it open.
     var viewerOpen by rememberSaveable(file.id) { mutableStateOf(false) }
     val kind = previewKind(file.mimeType, file.displayName)
+    val category = fileCategory(file.mimeType, file.displayName)
+    val playable = category == FileCategory.AUDIO || category == FileCategory.VIDEO
+    var playing by rememberSaveable(file.id) { mutableStateOf(false) }
+    if (playing && playable && !isMissing) {
+        MediaPlayerScreen(file, audioOnly = category == FileCategory.AUDIO, resolveBlob = viewModel::resolveBlob, onClose = { playing = false })
+        return
+    }
 
     if (viewerOpen && !isMissing && preview !is PreviewState.Failed) {
         when (kind) {
@@ -187,6 +202,18 @@ private fun DetailContent(file: FileEntity, viewModel: FilesViewModel, onClose: 
                 IconButton(onClick = { external(ExternalAction.OPEN) }, enabled = !isMissing) {
                     Icon(TazIcons.OpenExternal, contentDescription = "Open in another app")
                 }
+                if (appLockOn) {
+                    IconButton(onClick = {
+                        viewModel.setLocked(file.id, !file.isLocked)
+                        showMessage(if (file.isLocked) "Extra lock removed" else "TAZ will ask for your passcode before opening this file")
+                    }) {
+                        Icon(
+                            TazIcons.Lock,
+                            contentDescription = if (file.isLocked) "Stop asking for the passcode to open" else "Ask for the passcode to open",
+                            tint = if (file.isLocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
                 BarButton(TazIcons.Trash, "Delete", onClick = { confirmDelete = true })
             }
 
@@ -212,6 +239,14 @@ private fun DetailContent(file: FileEntity, viewModel: FilesViewModel, onClose: 
                     }
                 }
                 previewItems(preview, file.displayName, pageWidthPx, onOpenViewer = { viewerOpen = true })
+                if (playable && !isMissing) {
+                    item(key = "play") {
+                        androidx.compose.material3.FilledTonalButton(
+                            onClick = { playing = true },
+                            modifier = Modifier.padding(top = 12.dp)
+                        ) { Text(if (category == FileCategory.AUDIO) "Play" else "Play video") }
+                    }
+                }
                 item(key = "tags") {
                     TagsSection(
                         tags = fileTags,

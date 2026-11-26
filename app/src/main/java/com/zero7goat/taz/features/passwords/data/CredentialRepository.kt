@@ -7,6 +7,8 @@ import com.zero7goat.taz.core.security.FieldCipher
 import com.zero7goat.taz.core.security.FieldCipherException
 import com.zero7goat.taz.features.passwords.domain.CredentialDetail
 import com.zero7goat.taz.features.passwords.domain.CredentialInput
+import com.zero7goat.taz.features.passwords.domain.PasswordHistory
+import com.zero7goat.taz.features.passwords.domain.PasswordHistoryEntry
 import com.zero7goat.taz.features.passwords.domain.canSaveCredential
 import com.zero7goat.taz.features.passwords.domain.extractDomain
 import kotlinx.coroutines.Dispatchers
@@ -97,6 +99,14 @@ class CredentialRepository(
         val timestamp = now()
         val createdAt = if (input.createdAt == 0L) timestamp else input.createdAt
 
+        // A changed password moves into the history (kept encrypted, newest first).
+        val previous = dao.getById(input.id)
+        val oldPassword = previous?.let { decryptOrNull(it.passwordCipher, aad(it.id, FIELD_PASSWORD)) }
+        val oldHistory = previous?.let { decryptHistoryOrEmpty(it) }.orEmpty()
+        val history = PasswordHistory.afterSave(oldHistory, oldPassword, input.password, timestamp)
+        // The extra lock is changed only by setLocked; an edit never switches it off by accident.
+        val locked = previous?.isLocked ?: input.isLocked
+
         val entity = CredentialEntity(
             id = input.id,
             folderId = input.folderId,
@@ -110,7 +120,9 @@ class CredentialRepository(
             createdAt = createdAt,
             updatedAt = timestamp,
             category = input.category,
-            fieldsCipher = encryptFields(input.id, fields)
+            fieldsCipher = encryptFields(input.id, fields),
+            historyCipher = encryptHistory(input.id, history),
+            isLocked = locked
         )
         dao.upsert(entity)
         synchronized(usernameCache) { usernameCache.remove(input.id) }
@@ -127,7 +139,9 @@ class CredentialRepository(
             createdAt = createdAt,
             updatedAt = timestamp,
             category = input.category,
-            fields = fields
+            fields = fields,
+            history = history,
+            isLocked = locked
         )
     }
 
@@ -162,7 +176,8 @@ class CredentialRepository(
      * searchable). Logins that cannot be decrypted are skipped.
      */
     suspend fun decryptForSearch(): List<SearchableLogin> = withContext(Dispatchers.Default) {
-        dao.getAllActive().mapNotNull { entity ->
+        // Logins with their own lock are found by name only: nothing inside them is searched.
+        dao.getAllActive().filterNot { it.isLocked }.mapNotNull { entity ->
             try {
                 SearchableLogin(
                     id = entity.id,
@@ -219,7 +234,9 @@ class CredentialRepository(
             createdAt = detail.createdAt,
             updatedAt = detail.updatedAt,
             category = detail.category,
-            fieldsCipher = encryptFields(detail.id, CustomFields.normalize(detail.fields))
+            fieldsCipher = encryptFields(detail.id, CustomFields.normalize(detail.fields)),
+            historyCipher = encryptHistory(detail.id, detail.history),
+            isLocked = detail.isLocked
         )
 
     fun clearCache() {
@@ -238,13 +255,83 @@ class CredentialRepository(
         createdAt = entity.createdAt,
         updatedAt = entity.updatedAt,
         category = entity.category,
-        fields = decryptFields(entity)
+        fields = decryptFields(entity),
+        history = decryptHistoryOrEmpty(entity),
+        isLocked = entity.isLocked
     )
 
     private fun decryptFields(entity: CredentialEntity): List<CustomField> {
         val blob = entity.fieldsCipher ?: return emptyList()
         return CustomFields.decode(cipher.decrypt(blob, aad(entity.id, FIELD_CUSTOM)))
     }
+
+    private fun decryptOrNull(blob: ByteArray, aad: String): String? =
+        try {
+            cipher.decrypt(blob, aad)
+        } catch (e: FieldCipherException) {
+            null
+        }
+
+    /** The history, or nothing if there is none or it can't be read (it is never worth failing a save over). */
+    private fun decryptHistoryOrEmpty(entity: CredentialEntity): List<PasswordHistoryEntry> {
+        val blob = entity.historyCipher ?: return emptyList()
+        return try {
+            PasswordHistory.decode(cipher.decrypt(blob, aad(entity.id, FIELD_HISTORY)))
+        } catch (e: FieldCipherException) {
+            emptyList()
+        } catch (e: JSONException) {
+            emptyList()
+        }
+    }
+
+    private fun encryptHistory(id: String, history: List<PasswordHistoryEntry>): ByteArray? =
+        if (history.isEmpty()) null else cipher.encrypt(PasswordHistory.encode(history), aad(id, FIELD_HISTORY))
+
+    /**
+     * Merges duplicate logins into the most recently edited one: custom fields and notes the others
+     * add are kept, their different passwords go into its password history, and the others move to
+     * the trash (so a merge can be undone from there). Returns the id that was kept, or null.
+     */
+    suspend fun merge(ids: List<String>): String? {
+        val details = ids.distinct().mapNotNull { (getDetail(it) as? DetailResult.Found)?.detail }
+        if (details.size < 2) return null
+        val keep = details.maxBy { it.updatedAt }
+        val others = details.filter { it.id != keep.id }
+        val extraFields = others.flatMap { it.fields }
+            .filter { f -> keep.fields.none { it.label == f.label && it.value == f.value } }
+            .distinctBy { it.label + "\u0000" + it.value }
+            .map { it.copy() }
+        val notes = (listOf(keep.notes) + others.map { it.notes }).filter { it.isNotBlank() }.distinct().joinToString("\n\n")
+        save(
+            CredentialInput(
+                id = keep.id, folderId = keep.folderId, serviceName = keep.serviceName, username = keep.username,
+                password = keep.password, websiteUrl = keep.websiteUrl.ifBlank { others.firstOrNull { it.websiteUrl.isNotBlank() }?.websiteUrl.orEmpty() },
+                notes = notes, isFavorite = keep.isFavorite || others.any { it.isFavorite }, createdAt = minOf(keep.createdAt, others.minOf { it.createdAt }),
+                category = keep.category, fields = keep.fields + extraFields
+            )
+        )
+        val oldPasswords = others.map { it.password }.filter { it.isNotEmpty() && it != keep.password }.distinct()
+        if (oldPasswords.isNotEmpty()) addToHistory(keep.id, oldPasswords)
+        others.forEach { delete(it.id) }
+        return keep.id
+    }
+
+    private suspend fun addToHistory(id: String, passwords: List<String>) = withContext(Dispatchers.Default) {
+        val entity = dao.getById(id) ?: return@withContext
+        val current = decryptOrNull(entity.passwordCipher, aad(id, FIELD_PASSWORD))
+        val time = now()
+        val history = (passwords.map { PasswordHistoryEntry(it, time) } + decryptHistoryOrEmpty(entity))
+            .filterNot { it.password == current }
+            .distinctBy { it.password }
+            .take(PasswordHistory.MAX_ENTRIES)
+        dao.upsert(entity.copy(historyCipher = encryptHistory(id, history)))
+    }
+
+    /** Turns the extra passcode check for this login on or off. */
+    suspend fun setLocked(id: String, locked: Boolean) = dao.setLocked(id, locked)
+
+    /** Forgets the earlier passwords of a login. */
+    suspend fun clearHistory(id: String) = dao.clearHistory(id)
 
     private fun encryptFields(id: String, fields: List<CustomField>): ByteArray? =
         if (fields.isEmpty()) null else cipher.encrypt(CustomFields.encode(fields), aad(id, FIELD_CUSTOM))
@@ -254,6 +341,7 @@ class CredentialRepository(
         private const val FIELD_PASSWORD = "password"
         private const val FIELD_NOTES = "notes"
         private const val FIELD_CUSTOM = "fields"
+        private const val FIELD_HISTORY = "history"
 
         /** Binds each ciphertext to its row and field. */
         // DO NOT RENAME: existing user data depends on this exact value (see DataIdentityTest).

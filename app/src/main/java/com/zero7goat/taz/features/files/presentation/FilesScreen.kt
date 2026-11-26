@@ -118,6 +118,9 @@ fun FilesScreen(
     var folderToRename by remember { mutableStateOf<FolderEntity?>(null) }
     var folderToDelete by remember { mutableStateOf<FolderEntity?>(null) }
     var showSortFilter by remember { mutableStateOf(false) }
+    var addingFile by remember { mutableStateOf(false) }
+    var capturing by remember { mutableStateOf<AddKind?>(null) }
+    val requestCapture = rememberCapturePermissions(onDenied = { latestOnMessage(it) }, onReady = { capturing = it })
 
     val visibleIds = remember(state.files) { state.files.map { it.id } }
     LaunchedEffect(visibleIds) { selection = selection.keepVisible(visibleIds) }
@@ -272,8 +275,29 @@ fun FilesScreen(
             enter = scaleIn(tween(150)) + fadeIn(tween(150)),
             exit = scaleOut(tween(100)) + fadeOut(tween(100))
         ) {
-            TazFab(label = "Import files", onClick = { importLauncher.launch(arrayOf("*/*")) })
+            TazFab(label = "Add files", onClick = { addingFile = true })
         }
+    }
+
+    if (addingFile) {
+        AddFileSheet(
+            onPick = { kind ->
+                addingFile = false
+                if (kind == AddKind.IMPORT) importLauncher.launch(arrayOf("*/*")) else requestCapture(kind)
+            },
+            onDismiss = { addingFile = false }
+        )
+    }
+    val onCaptured: (java.io.File) -> Unit = { file ->
+        capturing = null
+        viewModel.importCaptured(file)
+    }
+    when (capturing) {
+        AddKind.PHOTO -> PhotoCaptureDialog(onCaptured = onCaptured, onDismiss = { capturing = null })
+        AddKind.VIDEO -> VideoCaptureDialog(onCaptured = onCaptured, onDismiss = { capturing = null })
+        AddKind.SCAN -> DocumentScanDialog(onCaptured = onCaptured, onDismiss = { capturing = null })
+        AddKind.VOICE -> VoiceRecorderDialog(onCaptured = onCaptured, onDismiss = { capturing = null })
+        else -> Unit
     }
 
     if (showSortFilter) {
